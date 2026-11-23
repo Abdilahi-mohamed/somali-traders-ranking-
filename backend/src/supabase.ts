@@ -17,6 +17,12 @@ type Database = {
         Update: Partial<Database["public"]["Tables"]["trading_accounts"]["Insert"]>;
         Relationships: [];
       };
+      admin_users: {
+        Row: { user_id: string; username: string; email: string; created_at: string };
+        Insert: { user_id: string; username: string; email: string; created_at?: string };
+        Update: Partial<Database["public"]["Tables"]["admin_users"]["Insert"]>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
