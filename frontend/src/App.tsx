@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import type { Trader } from "./types";
 import "./register.css";
 
@@ -17,7 +17,7 @@ type RegistrationAccount =
   | { type: "crypto"; exchange: "Binance" | "Bybit" | "OKX" | "Other"; accountLabel: string; showBalance: boolean };
 
 const api = async <T,>(path: string): Promise<T> => {
-  const response = await fetch(path);
+  const response = await fetch(path, { credentials: "include" });
   if (!response.ok) throw new Error(`Request failed (${response.status})`);
   return response.json() as Promise<T>;
 };
@@ -32,18 +32,19 @@ function Header() {
     <nav className="topnav">
       <NavLink to="/">Leaderboard</NavLink><a href="#awards">Annual Awards</a><a href="#method">How Verification Works</a>
     </nav>
-    <div className="top-actions"><span className="live-pill"><i /> Live Sync 99.98%</span><Link className="text-link" to="/dashboard">Login</Link><Link className="button button-primary small" to="/register">Register <Icon>arrow_forward</Icon></Link></div>
+    <div className="top-actions"><span className="live-pill"><i /> Live Sync 99.98%</span><Link className="text-link" to="/admin/login">Admin login</Link><Link className="button button-primary small" to="/register">Register <Icon>arrow_forward</Icon></Link></div>
   </header>;
 }
 
 function App() {
   const location = useLocation();
-  const isDashboard = location.pathname === "/dashboard" || location.pathname === "/admin";
+  const isDashboard = location.pathname === "/dashboard" || location.pathname.startsWith("/admin");
   return <>{isDashboard ? <PortalHeader /> : <Header />}<Routes>
     <Route path="/" element={<Leaderboard />} />
     <Route path="/register" element={<Register />} />
     <Route path="/dashboard" element={<TraderDashboard />} />
-    <Route path="/admin" element={<AdminConsole />} />
+    <Route path="/admin/login" element={<AdminLogin />} />
+    <Route path="/admin" element={<AdminGate />} />
     <Route path="*" element={<Leaderboard />} />
   </Routes></>;
 }
@@ -260,16 +261,100 @@ function MetricMini({ label, value }: { label: string; value: string | number })
 }
 
 function AdminConsole() {
+  const navigate = useNavigate();
   const { data, error } = useApi<{ registeredTraders: number; verifiedTraders: number; pendingVerifications: number; flaggedAccounts: number; workerUptime: number; accounts: Array<{ name: string; city: string; email: string; broker: string; id: string; type: string; roi: number; drawdown: number; audit: string; status: string }> }>("/api/admin/overview");
   const [filter, setFilter] = useState("All");
+  const [logoutError, setLogoutError] = useState("");
   const accounts = (data?.accounts ?? []).filter((account) => filter === "All" || account.status === filter);
+  async function logout() {
+    setLogoutError("");
+    try {
+      const response = await fetch("/api/admin/logout", { method: "POST", credentials: "include" });
+      if (!response.ok) {
+        setLogoutError("Could not sign out. Please try again.");
+        return;
+      }
+      navigate("/admin/login", { replace: true });
+    } catch {
+      setLogoutError("Could not reach the server. Please try again.");
+    }
+  }
   return <main className="portal-page admin-page">
     {error && <LoadError message={error} />}
-    <div className="welcome-row admin-title"><div><div className="eyebrow"><span className="secure-label"><Icon>shield</Icon> Secure console · Demo</span> Federation engine</div><h1>Super Admin Control Center</h1></div><span className="auth-badge"><Icon>verified_user</Icon> Demo session · no admin actions enabled</span></div>
+    <div className="welcome-row admin-title"><div><div className="eyebrow"><span className="secure-label"><Icon>shield</Icon> Authenticated console · Sample data</span> Federation engine</div><h1>Super Admin Control Center</h1></div><button className="button button-light" onClick={logout}><Icon>logout</Icon> Sign out</button></div>
+    {logoutError && <p className="form-error" role="alert">{logoutError}</p>}
     <section className="metric-grid"><Metric title="Registered traders" value={`${data?.registeredTraders ?? "—"}`} note={`${data?.verifiedTraders ?? "—"} verified`} icon="groups" /><Metric title="Pending verifications" value={`${data?.pendingVerifications ?? "—"}`} note="Requires staff review" icon="hourglass_top" /><Metric title="Flagged accounts" value={`${data?.flaggedAccounts ?? "—"}`} note="Requires audit" icon="warning" /><Metric title="Background sync worker" value="Healthy" note={`${data?.workerUptime ?? "—"}% uptime · demo status`} icon="bolt" green /></section>
     <section className="season-banner" id="awards"><div><span className="season-chip">Governance · Demo</span><h2>Annual Awards 2026 season</h2><p>View sample season criteria and moderation status. Administrative actions are intentionally disabled in this prototype.</p></div><div className="season-kpis"><span>Min closed trades <b>30</b></span><span>Max drawdown <b>15%</b></span><span>Account age <b>60 days</b></span><span>Finalist cutoff <b>Nov 15</b></span></div></section>
     <section className="panel moderation-panel"><div className="panel-heading"><div><h2>Accounts &amp; trader moderation</h2><p>Review sample audit records and verification status.</p></div><div className="filter-tabs">{["All", "Pending", "Verified", "Flagged"].map((item) => <button className={filter === item ? "active" : ""} onClick={() => setFilter(item)} key={item}>{item}</button>)}</div></div><div className="table-scroll"><table className="admin-table"><thead><tr><th>Trader</th><th>Platform &amp; server</th><th>Class</th><th className="right">ROI</th><th className="right">Max DD</th><th>Risk analysis</th><th>Status</th></tr></thead><tbody>{accounts.map((account) => <tr key={account.id}><td><b>{account.name}</b><small>{account.city} · {account.email}</small></td><td><b>{account.broker}</b><small>{account.id}</small></td><td>{account.type}</td><td className="right positive">+{account.roi}%</td><td className="right">{account.drawdown}%</td><td>{account.audit}</td><td><span className={`status-tag ${account.status.toLowerCase()}`}>{account.status}</span></td></tr>)}</tbody></table></div></section>
-    <p className="demo-caption">Admin data is illustrative only. Connect authentication, authorization, and audited server-side actions before production use.</p>
+    <p className="demo-caption">Admin access is verified through Supabase. Trader and moderation data remains illustrative; production actions are not enabled.</p>
+  </main>;
+}
+
+function AdminGate() {
+  const [authorized, setAuthorized] = useState(false);
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/admin/session", { credentials: "include" })
+      .then((response) => {
+        if (active) {
+          setAuthorized(response.ok);
+          setChecking(false);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setAuthorized(false);
+          setChecking(false);
+        }
+      });
+    return () => { active = false; };
+  }, []);
+
+  if (checking) return <main className="portal-page"><p className="subtle">Checking administrator access…</p></main>;
+  return authorized ? <AdminConsole /> : <Navigate to="/admin/login" replace />;
+}
+
+function AdminLogin() {
+  const navigate = useNavigate();
+  const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  async function submitLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setIsSubmitting(true);
+    const formData = new FormData(event.currentTarget);
+    try {
+      const response = await fetch("/api/admin/login", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: formData.get("username"), password: formData.get("password") })
+      });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Sign-in failed.");
+      navigate("/admin", { replace: true });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not reach the server. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return <main className="register-page admin-login-page">
+    <section className="panel admin-login-panel">
+      <div className="form-section-title"><span><Icon>shield_lock</Icon></span><div><h1>Super Admin Login</h1><p>Sign in with your administrator username and password.</p></div></div>
+      <form className="admin-login-form" onSubmit={submitLogin}>
+        <label>Username<input name="username" autoComplete="username" required minLength={3} maxLength={32} /></label>
+        <label>Password<input name="password" type="password" autoComplete="current-password" required maxLength={128} /></label>
+        {error && <p className="form-error" role="alert">{error}</p>}
+        <button className="button button-primary" type="submit" disabled={isSubmitting}>{isSubmitting ? "Signing in…" : "Sign in"} <Icon>arrow_forward</Icon></button>
+      </form>
+      <p className="admin-login-note">Administrator accounts are provisioned privately by the project owner. Public registration cannot create admin access.</p>
+      <Link className="text-link" to="/">← Return to public leaderboard</Link>
+    </section>
   </main>;
 }
 
