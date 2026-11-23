@@ -25,11 +25,12 @@ The frontend is available at `http://localhost:5173`. Vite proxies `/api` reques
 
 ## Routes
 
-- `/` — Public performance leaderboard
+- `/` — Public performance leaderboard, shown first
+- `/register` — Multi-step demo registration and account setup
 - `/dashboard` — Trader overview and connected account sample
 - `/admin` — Administrative moderation overview
 
-The API currently serves illustrative data only: `GET /api/health`, `GET /api/leaderboard`, `GET /api/trader/overview`, and `GET /api/admin/overview`. No broker credentials, authentication, or account actions are implemented. Add production-grade authentication, authorization, persistence, audit logging, and broker integrations before using this as a real trading service.
+The API currently serves illustrative data only: `GET /api/health`, `GET /api/leaderboard`, `GET /api/trader/overview`, and `GET /api/admin/overview`. Registration is a browser-only prototype and does not send or save profile data. Do not enter broker investor passwords, exchange API secrets, or identity documents; those integrations are not enabled. Add production-grade authentication, authorization, encrypted storage, consent, audit logging, and official read-only broker authorization before using this as a real trading service.
 
 ## Build
 
