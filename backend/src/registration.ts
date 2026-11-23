@@ -1,8 +1,5 @@
-import { randomUUID } from "node:crypto";
-import bcrypt from "bcryptjs";
 import { z } from "zod";
-import { config } from "./config.js";
-import { database } from "./database.js";
+import { getSupabaseClients } from "./supabase.js";
 
 const accountSchema = z.discriminatedUnion("type", [
   z.object({
@@ -14,18 +11,18 @@ const accountSchema = z.discriminatedUnion("type", [
     server: z.string().trim().min(2).max(120),
     accountNumber: z.string().trim().regex(/^\d{4,20}$/),
     showBalance: z.boolean()
-  }).superRefine((account, context) => {
-    if (account.category === "prop" && !account.propFirm) {
-      context.addIssue({ code: "custom", path: ["propFirm"], message: "Select a prop firm." });
-    }
-  }),
+  }).strict(),
   z.object({
     type: z.literal("crypto"),
     exchange: z.enum(["Binance", "Bybit", "OKX", "Other"]),
     accountLabel: z.string().trim().max(80).default(""),
     showBalance: z.boolean()
-  })
-]);
+  }).strict()
+]).superRefine((account, context) => {
+  if (account.type === "forex" && account.category === "prop" && !account.propFirm) {
+    context.addIssue({ code: "custom", path: ["propFirm"], message: "Select a prop firm." });
+  }
+});
 
 export const registrationSchema = z.object({
   fullName: z.string().trim().min(2).max(100),
@@ -37,7 +34,7 @@ export const registrationSchema = z.object({
   password: z.string().min(10).max(128),
   consent: z.literal(true),
   account: accountSchema
-});
+}).strict();
 
 export type RegistrationInput = z.infer<typeof registrationSchema>;
 
@@ -49,69 +46,49 @@ export class DuplicateEmailError extends Error {
 }
 
 export async function registerTrader(input: RegistrationInput) {
-  const passwordHash = await bcrypt.hash(input.password, config.bcryptRounds);
-  const traderId = randomUUID();
-  const accountId = randomUUID();
-  const createdAt = new Date().toISOString();
-  const account = input.account;
+  const { auth, database } = getSupabaseClients();
+  const { data, error } = await auth.auth.signUp({
+    email: input.email.toLowerCase(),
+    password: input.password,
+    options: { data: { trading_alias: input.alias } }
+  });
 
-  database.exec("BEGIN IMMEDIATE");
-  try {
-    database.prepare(`
-      INSERT INTO traders
-        (id, full_name, trading_alias, email, phone, region, social_profile, password_hash, consent_at, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      traderId,
-      input.fullName,
-      input.alias,
-      input.email.toLowerCase(),
-      input.phone,
-      input.region,
-      input.social,
-      passwordHash,
-      createdAt,
-      createdAt
-    );
-
-    if (account.type === "forex") {
-      database.prepare(`
-        INSERT INTO trading_accounts
-          (id, trader_id, account_type, account_category, prop_firm, platform, broker_name, server_name, account_number, show_balance)
-        VALUES (?, ?, 'forex', ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        accountId,
-        traderId,
-        account.category,
-        account.propFirm ?? null,
-        account.platform,
-        account.brokerName,
-        account.server,
-        account.accountNumber,
-        Number(account.showBalance)
-      );
-    } else {
-      database.prepare(`
-        INSERT INTO trading_accounts
-          (id, trader_id, account_type, exchange_name, account_label, show_balance)
-        VALUES (?, ?, 'crypto', ?, ?, ?)
-      `).run(
-        accountId,
-        traderId,
-        account.exchange,
-        account.accountLabel,
-        Number(account.showBalance)
-      );
-    }
-
-    database.exec("COMMIT");
-  } catch (error) {
-    database.exec("ROLLBACK");
-    if (error instanceof Error && error.message.includes("UNIQUE constraint failed: traders.email")) {
+  if (error) {
+    if (error.code === "user_already_exists" || error.message.toLowerCase().includes("already registered")) {
       throw new DuplicateEmailError();
     }
     throw error;
   }
+  if (!data.user) {
+    throw new Error("Supabase Auth did not return a user after signup.");
+  }
+  if (data.user.identities?.length === 0) {
+    throw new DuplicateEmailError();
+  }
 
-  return { id: traderId, status: "pending_verification" as const };
+  const { error: profileError } = await database.rpc("create_trader_registration", {
+    p_user_id: data.user.id,
+    p_full_name: input.fullName,
+    p_alias: input.alias,
+    p_email: input.email.toLowerCase(),
+    p_phone: input.phone,
+    p_region: input.region,
+    p_social: input.social,
+    p_account: input.account,
+    p_consent_at: new Date().toISOString()
+  });
+
+  if (profileError) {
+    const { error: cleanupError } = await database.auth.admin.deleteUser(data.user.id);
+    if (cleanupError) {
+      console.error("Could not remove Supabase Auth user after profile creation failed.", cleanupError.message);
+    }
+    throw profileError;
+  }
+
+  return {
+    id: data.user.id,
+    status: "pending_verification" as const,
+    emailConfirmationRequired: !data.session
+  };
 }

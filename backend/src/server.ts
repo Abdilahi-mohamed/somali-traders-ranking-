@@ -4,6 +4,7 @@ import express from "express";
 import { config } from "./config.js";
 import { adminAccounts, traders, traderOverview } from "./data.js";
 import { DuplicateEmailError, registerTrader, registrationSchema } from "./registration.js";
+import { SupabaseConfigurationError } from "./supabase.js";
 
 const app = express();
 
@@ -33,6 +34,10 @@ app.post("/api/register", registrationLimiter, (request, response, next) => {
   }).catch((error: unknown) => {
     if (error instanceof DuplicateEmailError) {
       response.status(409).json({ error: error.message });
+      return;
+    }
+    if (error instanceof SupabaseConfigurationError) {
+      response.status(503).json({ error: error.message });
       return;
     }
     next(error);

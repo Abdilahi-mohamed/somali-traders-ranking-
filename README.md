@@ -11,6 +11,8 @@ Open two terminals from the project directory.
 
 ```powershell
 cd backend
+Copy-Item .env.example .env
+# Fill SUPABASE_URL, SUPABASE_ANON_KEY, and SUPABASE_SERVICE_ROLE_KEY in .env
 npm install
 npm run dev
 ```
@@ -22,15 +24,16 @@ npm run dev
 ```
 
 The frontend is available at `http://localhost:5173`. Vite proxies `/api` requests to the backend at `http://localhost:4000`.
+The backend requires Node.js 22 or newer. Create a Supabase project, set the three Supabase values in `backend/.env`, then run `backend/supabase/migrations/202611230001_registration.sql` in the Supabase SQL Editor. Keep `.env` local; the service role key must stay on the backend and must never be exposed to Vite or committed.
 
 ## Routes
 
 - `/` — Public performance leaderboard, shown first
-- `/register` — Multi-step demo registration and account setup
+- `/register` — Multi-step registration and account setup
 - `/dashboard` — Trader overview and connected account sample
 - `/admin` — Administrative moderation overview
 
-The API currently serves illustrative data only: `GET /api/health`, `GET /api/leaderboard`, `GET /api/trader/overview`, and `GET /api/admin/overview`. Registration is a browser-only prototype and does not send or save profile data. Do not enter broker investor passwords, exchange API secrets, or identity documents; those integrations are not enabled. Add production-grade authentication, authorization, encrypted storage, consent, audit logging, and official read-only broker authorization before using this as a real trading service.
+The API serves illustrative leaderboard/admin data and supports registration: `GET /api/health`, `GET /api/leaderboard`, `GET /api/trader/overview`, `GET /api/admin/overview`, and `POST /api/register`. Supabase Auth manages website passwords; the backend stores profile and non-secret account metadata in RLS-protected Supabase tables. Broker investor passwords, exchange API keys/secrets, and identity documents are not accepted. Configure Supabase Auth email confirmation before launch. The public leaderboard still uses sample data; authenticated login, live broker connections, and production privacy/compliance workflows remain to be implemented.
 
 ## Build
 
