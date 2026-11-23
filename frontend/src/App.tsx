@@ -1,6 +1,20 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import type { Trader } from "./types";
+import "./register.css";
+
+type RegistrationProfile = {
+  fullName: string;
+  alias: string;
+  email: string;
+  phone: string;
+  region: string;
+  social: string;
+};
+
+type RegistrationAccount =
+  | { type: "forex"; category: "live" | "prop"; propFirm?: string; platform: "MT4" | "MT5"; brokerName: string; server: string; accountNumber: string; showBalance: boolean }
+  | { type: "crypto"; exchange: "Binance" | "Bybit" | "OKX" | "Other"; accountLabel: string; showBalance: boolean };
 
 const api = async <T,>(path: string): Promise<T> => {
   const response = await fetch(path);
@@ -18,7 +32,7 @@ function Header() {
     <nav className="topnav">
       <NavLink to="/">Leaderboard</NavLink><a href="#awards">Annual Awards</a><a href="#method">How Verification Works</a>
     </nav>
-    <div className="top-actions"><span className="live-pill"><i /> Live Sync 99.98%</span><Link className="text-link" to="/dashboard">Trader login</Link><Link className="button button-primary small" to="/dashboard">Trader portal <Icon>arrow_forward</Icon></Link></div>
+    <div className="top-actions"><span className="live-pill"><i /> Live Sync 99.98%</span><Link className="text-link" to="/dashboard">Login</Link><Link className="button button-primary small" to="/register">Register <Icon>arrow_forward</Icon></Link></div>
   </header>;
 }
 
@@ -27,6 +41,7 @@ function App() {
   const isDashboard = location.pathname === "/dashboard" || location.pathname === "/admin";
   return <>{isDashboard ? <PortalHeader /> : <Header />}<Routes>
     <Route path="/" element={<Leaderboard />} />
+    <Route path="/register" element={<Register />} />
     <Route path="/dashboard" element={<TraderDashboard />} />
     <Route path="/admin" element={<AdminConsole />} />
     <Route path="*" element={<Leaderboard />} />
@@ -58,10 +73,9 @@ function Leaderboard() {
     .filter((trader) => region === "all" || trader.city.toLowerCase().includes(region));
   const selected = rows.find((trader) => trader.id === activeTrader) ?? rows[0];
   return <main className="public-page">
-    <section className="hero">
-      <div className="hero-top"><span className="award-badge"><Icon>verified</Icon> Somali Traders Annual Awards 2026 <span className="muted-separator">|</span> Broker telemetry verified</span><span className="countdown"><Icon>timer</Icon> Data lock &amp; voting: <b>142d : 08h : 24m</b></span></div>
-      <div className="hero-main"><div><p className="eyebrow light-eyebrow">Somalia &amp; global diaspora</p><h1>Institutional audit<br />for the Horn &amp; diaspora.</h1><p className="hero-copy">Performance rankings of verified Somali forex and crypto operators, built on read-only account telemetry.</p></div><div className="hero-buttons"><a className="button button-lime" href="#awards"><Icon>military_tech</Icon> Explore 2026 awards</a><a className="button button-glass" href="#method"><Icon>shield</Icon> Verification standard</a></div></div>
-      <div className="hero-stats"><Stat label="Verified Somali operators" value="142" detail="Across 12+ brokers" icon="groups" /><Stat label="Live tracked equity" value="$2.48M+" detail="USD audited" icon="account_balance" /><Stat label="Screenshot fraud rate" value="0.0%" detail="Investor API sync only" icon="security" /></div>
+    <section className="ranking-intro">
+      <div><p className="eyebrow">Somalia &amp; global diaspora · 2026</p><h1>Somali Trader Rankings</h1><p>Verified performance, ranked by audited account metrics.</p></div>
+      <Link className="button button-primary" to="/register"><Icon>person_add</Icon> Register as a trader</Link>
     </section>
     {error && <LoadError message={error} />}
     <section className="filter-panel">
@@ -84,12 +98,145 @@ function Leaderboard() {
   </main>;
 }
 
-function Stat({ label, value, detail, icon }: { label: string; value: string; detail: string; icon: string }) {
-  return <div className="hero-stat"><div className="stat-label">{label}<Icon>{icon}</Icon></div><b>{value}</b><span>{detail}</span></div>;
-}
-
 function Spotlight({ trader }: { trader: Trader }) {
   return <aside className="spotlight"><div className="accent-bar" /><div className="spotlight-person"><span className="avatar avatar-large">{trader.initials}</span><div><h2>{trader.name} <Icon>verified</Icon></h2><p>{trader.city} · Verified trader</p></div><span className="score">Score {trader.score}</span></div><div className="strategy-tags"><span>Consistent returns</span><span>{trader.platform}</span><span>Audited</span></div><div className="chart-box"><div className="chart-title"><b>Audited equity trajectory</b><strong>+{trader.roi}%</strong></div><svg viewBox="0 0 360 112" role="img" aria-label="Rising audited equity line chart"><defs><linearGradient id="chartFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#0d805b" stopOpacity=".24" /><stop offset="1" stopColor="#0d805b" stopOpacity="0" /></linearGradient></defs><path d="M0 94 L35 83 L78 85 L120 61 L160 69 L205 44 L242 50 L280 24 L322 31 L360 9 L360 112 L0 112Z" fill="url(#chartFill)" /><path d="M0 94 L35 83 L78 85 L120 61 L160 69 L205 44 L242 50 L280 24 L322 31 L360 9" fill="none" stroke="#087550" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /><circle cx="360" cy="9" r="4" fill="#087550" /></svg><div className="chart-axis"><span>Jan 2026</span><span>Mar 2026</span></div></div><div className="spotlight-metrics"><span><small>Drawdown</small><b>{trader.drawdown}%</b></span><span><small>Profit factor</small><b>{trader.profitFactor}</b></span><span><small>Win rate</small><b>{trader.winRate}%</b></span></div><div className="proof"><b><Icon>verified_user</Icon> Cryptographic proof stamp</b><p>Account telemetry is verified through read-only broker connections.</p></div><button className="button button-primary full-width">Inspect trading journal <Icon>arrow_forward</Icon></button></aside>;
+}
+
+function Register() {
+  const [step, setStep] = useState(1);
+  const [accountType, setAccountType] = useState<"forex" | "crypto">("forex");
+  const [accountCategory, setAccountCategory] = useState<"live" | "prop">("live");
+  const [showBalance, setShowBalance] = useState(false);
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [formError, setFormError] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const [profile, setProfile] = useState<RegistrationProfile | null>(null);
+  const [accountDetails, setAccountDetails] = useState<RegistrationAccount | null>(null);
+  const [registrationError, setRegistrationError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [registeredId, setRegisteredId] = useState("");
+  const [emailConfirmationRequired, setEmailConfirmationRequired] = useState(false);
+
+  function continueProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (password !== confirmPassword) {
+      setFormError("Passwords do not match.");
+      return;
+    }
+    setFormError("");
+    const formData = new FormData(event.currentTarget);
+    setProfile({
+      fullName: String(formData.get("fullName") ?? ""),
+      alias: String(formData.get("alias") ?? ""),
+      email: String(formData.get("email") ?? ""),
+      phone: String(formData.get("phone") ?? ""),
+      region: String(formData.get("region") ?? ""),
+      social: String(formData.get("social") ?? "")
+    });
+    setStep(2);
+  }
+
+  function continueAccount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const visibleBalance = formData.get("showBalance") === "on";
+    if (accountType === "forex") {
+      const platform = formData.get("platform") === "MT4" ? "MT4" : "MT5";
+      setAccountDetails({
+        type: "forex",
+        category: accountCategory,
+        propFirm: String(formData.get("propFirm") ?? ""),
+        platform,
+        brokerName: String(formData.get("brokerName") ?? ""),
+        server: String(formData.get("server") ?? ""),
+        accountNumber: String(formData.get("accountNumber") ?? ""),
+        showBalance: visibleBalance
+      });
+    } else {
+      const exchangeValue = String(formData.get("exchange") ?? "");
+      const exchange = exchangeValue === "Binance" || exchangeValue === "Bybit" || exchangeValue === "OKX" || exchangeValue === "Other"
+        ? exchangeValue
+        : "Other";
+      setAccountDetails({
+        type: "crypto",
+        exchange,
+        accountLabel: String(formData.get("accountLabel") ?? ""),
+        showBalance: visibleBalance
+      });
+    }
+    setRegistrationError("");
+    setStep(3);
+  }
+
+  async function finishRegistration() {
+    if (!profile || !accountDetails) {
+      setRegistrationError("Complete the profile and account steps first.");
+      return;
+    }
+    setIsSubmitting(true);
+    setRegistrationError("");
+    try {
+      const response = await fetch("/api/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...profile, password, consent: true, account: accountDetails })
+      });
+      const result = await response.json() as Record<string, unknown>;
+      if (!response.ok) {
+        throw new Error(typeof result.error === "string" ? result.error : "Registration could not be completed.");
+      }
+      if (typeof result.id !== "string") {
+        throw new Error("The server returned an invalid registration response.");
+      }
+      setRegisteredId(result.id);
+      setEmailConfirmationRequired(result.emailConfirmationRequired === true);
+      setPassword("");
+      setConfirmPassword("");
+      setSubmitted(true);
+    } catch (error) {
+      setRegistrationError(error instanceof Error ? error.message : "Registration could not be completed.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return <main className="register-page">
+    <div className="register-heading"><div><p className="eyebrow">Trader onboarding · Demo</p><h1>Create your trader profile</h1><p>Set up your public ranking profile. You can connect verified performance after registration.</p></div><Link className="text-link" to="/">← Back to rankings</Link></div>
+    <div className="registration-layout">
+      <section className="panel registration-panel">
+        <div className="registration-steps" aria-label="Registration steps">
+          {[["1", "Profile"], ["2", "Trading account"], ["3", "Review"]].map(([number, label], index) => <div className={`registration-step ${step === index + 1 ? "current" : ""} ${step > index + 1 ? "complete" : ""}`} key={number}><span>{step > index + 1 ? "✓" : number}</span>{label}</div>)}
+        </div>
+        {submitted ? <div className="registration-result" role="status"><span className="result-icon"><Icon>check_circle</Icon></span><h2>Registration received</h2><p>Your profile is saved and pending review. {emailConfirmationRequired ? "Check your email to confirm your address." : ""} Keep your registration reference: <code>{registeredId}</code>.</p><Link className="button button-primary" to="/">View leaderboard</Link></div> : <>
+          {step === 1 && <form className="registration-form" onSubmit={continueProfile}>
+            <div className="form-section-title"><span>01</span><div><h2>Your public profile</h2><p>These details identify your trader profile.</p></div></div>
+            <div className="form-grid"><label>Full name<input name="fullName" autoComplete="name" defaultValue={profile?.fullName ?? ""} required placeholder="Your full name" /></label><label>Trading alias<input name="alias" defaultValue={profile?.alias ?? ""} required placeholder="Name shown on leaderboard" /></label><label>Email address<input name="email" type="email" autoComplete="email" defaultValue={profile?.email ?? ""} required placeholder="you@example.com" /></label><label>Phone / WhatsApp<input name="phone" type="tel" autoComplete="tel" defaultValue={profile?.phone ?? ""} required placeholder="+252 63 000 0000" /></label><label>City / region<select name="region" defaultValue={profile?.region ?? ""} required><option value="" disabled>Select your region</option><option>Boorama</option><option>Hargeysa</option><option>Muqdisho</option><option>Garoowe</option><option>Qurbaha / Diaspora</option></select></label><label>Telegram or social profile <span className="optional">Optional</span><input name="social" defaultValue={profile?.social ?? ""} placeholder="@username or profile URL" /></label><label>Create website password<input name="password" type="password" autoComplete="new-password" minLength={10} required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 10 characters" /></label><label>Confirm password<input name="confirmPassword" type="password" autoComplete="new-password" minLength={10} required value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Enter it again" /></label></div>
+            {formError && <p className="form-error" role="alert">{formError}</p>}
+            <label className="consent-row"><input type="checkbox" required /> I consent to saving my profile and selected account details in Supabase. Supabase Auth manages my website password.</label>
+            <div className="form-actions"><span>Next: account details</span><button className="button button-primary" type="submit">Continue <Icon>arrow_forward</Icon></button></div>
+          </form>}
+          {step === 2 && <form className="registration-form" onSubmit={continueAccount}>
+            <div className="form-section-title"><span>02</span><div><h2>Connect a trading account</h2><p>Choose your account type and add non-secret account details.</p></div></div>
+            <div className="account-kind-tabs"><button type="button" onClick={() => setAccountType("forex")} className={accountType === "forex" ? "selected" : ""}><Icon>candlestick_chart</Icon> Forex / Prop firm</button><button type="button" onClick={() => setAccountType("crypto")} className={accountType === "crypto" ? "selected" : ""}><Icon>currency_bitcoin</Icon> Crypto</button></div>
+            {accountType === "forex" ? <div className="form-grid"><fieldset className="form-field full-span"><legend>Account category</legend><label className="radio-option"><input type="radio" name="category" checked={accountCategory === "live"} onChange={() => setAccountCategory("live")} /> Live real account</label><label className="radio-option"><input type="radio" name="category" checked={accountCategory === "prop"} onChange={() => setAccountCategory("prop")} /> Prop firm funded account</label></fieldset>{accountCategory === "prop" && <label>Prop firm<select name="propFirm" defaultValue="" required><option value="" disabled>Select firm</option><option>FTMO</option><option>FundedNext</option><option>The5ers</option><option>Other</option></select></label>}<label>Trading platform<select name="platform" defaultValue="MT5"><option>MT4</option><option>MT5</option></select></label><label>Broker name<input name="brokerName" required placeholder="e.g. Exness, IC Markets" /></label><label>Broker server<input name="server" required placeholder="Exact server name" /></label><label>Account number / login ID<input name="accountNumber" required inputMode="numeric" pattern="[0-9]{4,20}" placeholder="4–20 digits" /></label></div> : <div className="form-grid"><label>Exchange<select name="exchange" defaultValue="" required><option value="" disabled>Select exchange</option><option>Binance</option><option>Bybit</option><option>OKX</option><option>Other</option></select></label><label>Account label<input name="accountLabel" placeholder="Optional label" /></label><div className="secure-connect full-span"><Icon>lock</Icon><div><b>API key connection is not available in this demo</b><p>Do not paste API keys or secrets here. A production integration should use an official authorization flow restricted to read-only access, with withdrawals and trading disabled.</p></div></div></div>}
+            <label className="toggle-row"><input name="showBalance" type="checkbox" checked={showBalance} onChange={(event) => setShowBalance(event.target.checked)} /><span><b>Show balance publicly</b><small>When off, the public profile shows performance percentages only.</small></span><span className={`toggle ${showBalance ? "on" : ""}`} aria-hidden="true"><i /></span></label>
+            <div className="secure-connect"><Icon>verified_user</Icon><div><b>Broker credential connection is not enabled</b><p>Never enter an investor password or master password into this prototype. Secure broker authorization must be configured before account verification can work.</p></div></div>
+            {registrationError && <p className="form-error" role="alert">{registrationError}</p>}
+            <div className="form-actions"><button className="button button-light" onClick={() => setStep(1)} type="button">Back</button><button className="button button-primary" type="submit">Review registration <Icon>arrow_forward</Icon></button></div>
+          </form>}
+          {step === 3 && <div className="registration-form">
+            <div className="form-section-title"><span>03</span><div><h2>Review &amp; finish</h2><p>Check what this demo will and will not do.</p></div></div>
+            <div className="review-list"><p><Icon>check_circle</Icon> Your profile and account metadata will be saved in Supabase.</p><p><Icon>lock</Icon> Supabase Auth manages your website password; this app does not store it in the profile database.</p><p><Icon>lock</Icon> No investor password, API secret, or exchange key is collected.</p></div>
+            <div className="secure-connect"><Icon>badge</Icon><div><b>Awards identity review</b><p>Government ID and payout certificates are not uploaded here. A verified, access-controlled review flow must be in place before collecting identity documents.</p></div></div>
+            {registrationError && <p className="form-error" role="alert">{registrationError}</p>}
+            <div className="form-actions"><button className="button button-light" onClick={() => setStep(2)} type="button">Back</button><button className="button button-primary" disabled={isSubmitting} onClick={finishRegistration} type="button">{isSubmitting ? "Saving…" : "Create account"} <Icon>check</Icon></button></div>
+          </div>}
+        </>}
+      </section>
+      <aside className="registration-aside"><div className="aside-icon"><Icon>shield_lock</Icon></div><h2>Your account security comes first</h2><p>We only show audited rankings. Never share your main trading password or enable API trading/withdrawal permissions.</p><ul><li><Icon>check</Icon> Website passwords handled by Supabase Auth</li><li><Icon>check</Icon> Optional balance privacy</li><li><Icon>lock</Icon> Broker secrets and ID documents are not collected</li></ul><div className="aside-note">Keep the Supabase service role key on the server only.</div></aside>
+    </div>
+  </main>;
 }
 
 function TraderDashboard() {
