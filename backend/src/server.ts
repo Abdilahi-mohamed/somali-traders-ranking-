@@ -4,8 +4,8 @@ import cors from "cors";
 import express from "express";
 import { getAdminFromAccessToken, InvalidAdminCredentialsError, loginAdmin, adminLoginSchema } from "./adminAuth.js";
 import { config } from "./config.js";
-import { adminAccounts, traders, traderOverview } from "./data.js";
-import { DuplicateEmailError, registerTrader, registrationSchema } from "./registration.js";
+import { adminAccounts } from "./data.js";
+import { DuplicateEmailError, DuplicateTradingAccountError, registerTrader, registrationSchema } from "./registration.js";
 import { SupabaseConfigurationError } from "./supabase.js";
 
 const app = express();
@@ -73,6 +73,10 @@ app.post("/api/register", registrationLimiter, (request, response, next) => {
       response.status(409).json({ error: error.message });
       return;
     }
+    if (error instanceof DuplicateTradingAccountError) {
+      response.status(409).json({ error: error.message });
+      return;
+    }
     if (error instanceof SupabaseConfigurationError) {
       response.status(503).json({ error: error.message });
       return;
@@ -82,7 +86,7 @@ app.post("/api/register", registrationLimiter, (request, response, next) => {
 });
 
 app.get("/api/leaderboard", (_request, response) => {
-  response.json({ traders, total: 142, verifiedOnline: 8 });
+  response.json({ traders: [], total: 0, verifiedOnline: 0 });
 });
 
 app.post("/api/admin/login", adminLoginLimiter, (request, response, next) => {
@@ -129,7 +133,7 @@ app.get("/api/admin/overview", requireAdmin, (_request, response) => {
 });
 
 app.get("/api/trader/overview", (_request, response) => {
-  response.json(traderOverview);
+  response.json({ status: "integration_required", accounts: [] });
 });
 
 app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {

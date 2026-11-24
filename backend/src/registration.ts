@@ -4,12 +4,11 @@ import { getSupabaseClients } from "./supabase.js";
 const accountSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("forex"),
-    category: z.enum(["live", "prop"]),
-    propFirm: z.string().trim().max(80).optional(),
     platform: z.enum(["MT4", "MT5"]),
     brokerName: z.string().trim().min(2).max(80),
     server: z.string().trim().min(2).max(120),
     accountNumber: z.string().trim().regex(/^\d{4,20}$/),
+    currency: z.string().trim().regex(/^[A-Za-z]{3}$/).transform((value) => value.toUpperCase()),
     showBalance: z.boolean()
   }).strict(),
   z.object({
@@ -18,11 +17,7 @@ const accountSchema = z.discriminatedUnion("type", [
     accountLabel: z.string().trim().max(80).default(""),
     showBalance: z.boolean()
   }).strict()
-]).superRefine((account, context) => {
-  if (account.type === "forex" && account.category === "prop" && !account.propFirm) {
-    context.addIssue({ code: "custom", path: ["propFirm"], message: "Select a prop firm." });
-  }
-});
+]);
 
 export const registrationSchema = z.object({
   fullName: z.string().trim().min(2).max(100),
@@ -83,6 +78,9 @@ export async function registerTrader(input: RegistrationInput) {
     if (cleanupError) {
       console.error("Could not remove Supabase Auth user after profile creation failed.", cleanupError.message);
     }
+    if (profileError.code === "23505" && profileError.message.includes("trading_accounts_mt_login_unique")) {
+      throw new DuplicateTradingAccountError();
+    }
     throw profileError;
   }
 
@@ -91,4 +89,11 @@ export async function registerTrader(input: RegistrationInput) {
     status: "pending_verification" as const,
     emailConfirmationRequired: !data.session
   };
+}
+
+export class DuplicateTradingAccountError extends Error {
+  constructor() {
+    super("This MT4/MT5 account has already been registered.");
+    this.name = "DuplicateTradingAccountError";
+  }
 }

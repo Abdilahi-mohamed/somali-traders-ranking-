@@ -13,7 +13,7 @@ type RegistrationProfile = {
 };
 
 type RegistrationAccount =
-  | { type: "forex"; category: "live" | "prop"; propFirm?: string; platform: "MT4" | "MT5"; brokerName: string; server: string; accountNumber: string; showBalance: boolean }
+  | { type: "forex"; platform: "MT4" | "MT5"; brokerName: string; server: string; accountNumber: string; currency: string; showBalance: boolean }
   | { type: "crypto"; exchange: "Binance" | "Bybit" | "OKX" | "Other"; accountLabel: string; showBalance: boolean };
 
 const api = async <T,>(path: string): Promise<T> => {
@@ -32,7 +32,7 @@ function Header() {
     <nav className="topnav">
       <NavLink to="/">Leaderboard</NavLink><a href="#awards">Annual Awards</a><a href="#method">How Verification Works</a>
     </nav>
-    <div className="top-actions"><span className="live-pill"><i /> Live Sync 99.98%</span><Link className="text-link" to="/admin/login">Admin login</Link><Link className="button button-primary small" to="/register">Register <Icon>arrow_forward</Icon></Link></div>
+    <div className="top-actions"><span className="live-pill">Provider setup required</span><Link className="text-link" to="/admin/login">Admin login</Link><Link className="button button-primary small" to="/register">Register <Icon>arrow_forward</Icon></Link></div>
   </header>;
 }
 
@@ -50,7 +50,7 @@ function App() {
 }
 
 function PortalHeader() {
-  return <header className="portal-header"><Link className="brand" to="/"><span className="brand-mark">ST</span><span>Trader<span className="green">Hub</span></span></Link><nav className="portal-nav"><NavLink to="/dashboard">Overview</NavLink><a href="#accounts">Trading accounts</a><a href="#awards">Awards status</a><NavLink to="/admin">Admin console</NavLink></nav><div className="top-actions"><span className="live-pill"><i /> MT5 · Active Sync</span><Link className="button button-light small" to="/">Public leaderboard</Link></div></header>;
+  return <header className="portal-header"><Link className="brand" to="/"><span className="brand-mark">ST</span><span>Trader<span className="green">Hub</span></span></Link><nav className="portal-nav"><NavLink to="/dashboard">Overview</NavLink><a href="#accounts">Trading accounts</a><a href="#awards">Awards status</a><NavLink to="/admin">Admin console</NavLink></nav><div className="top-actions"><span className="live-pill">Provider setup required</span><Link className="button button-light small" to="/">Public leaderboard</Link></div></header>;
 }
 
 function useApi<T>(path: string) {
@@ -85,16 +85,16 @@ function Leaderboard() {
     </section>
     <section className="leader-layout">
       <div className="table-card">
-        <div className="table-heading"><div><h2>Verified Somali Performance Registry</h2><span className="status-tag">● {data?.verifiedOnline ?? "—"} verified online</span></div><span className="sync-status"><Icon>sync</Icon> Sync latency: 14s</span></div>
+        <div className="table-heading"><div><h2>Verified Somali Performance Registry</h2><span className="status-tag">{data?.verifiedOnline ?? "—"} verified online</span></div><span className="sync-status">Provider integration pending</span></div>
         <div className="table-scroll"><table className="leader-table"><thead><tr><th>Rank</th><th>Trader &amp; origin</th><th>Broker architecture</th><th className="right">ROI</th><th className="right">Max DD</th><th className="right">PF</th><th className="right">Win rate</th><th className="right">Audited equity</th><th className="right">Score</th></tr></thead><tbody>
           {rows.map((trader) => <tr key={trader.id} onClick={() => setActiveTrader(trader.id)} className={activeTrader === trader.id ? "row-selected" : ""}><td><span className={`rank rank-${trader.id}`}>{data!.traders.indexOf(trader) + 1}</span></td><td><div className="person-cell"><span className="avatar">{trader.initials}</span><span><b>{trader.name} <Icon>verified</Icon></b><small>{trader.city}</small></span></div></td><td><b>{trader.account}</b><small>{trader.platform} · Read-only</small></td><td className="right positive">+{trader.roi}%</td><td className="right">{trader.drawdown}%</td><td className="right">{trader.profitFactor}</td><td className="right">{trader.winRate}%</td><td className="right">{trader.equity ? `$${trader.equity.toLocaleString()}` : <span className="hidden-balance"><Icon>lock</Icon> Hidden</span>}</td><td className="right"><span className="score">{trader.score}</span></td></tr>)}
-          {!rows.length && <tr><td className="empty-row" colSpan={9}>No traders match your search.</td></tr>}
+          {!rows.length && <tr><td className="empty-row" colSpan={9}>No Verified Real accounts are available yet. A supported read-only broker integration is required.</td></tr>}
         </tbody></table></div>
         <div className="table-footer"><span>Showing {rows.length} of {data?.total ?? "—"} verified operators</span><div><button aria-label="Previous page" disabled>‹</button><span>Page 1 of 18</span><button aria-label="Next page">›</button></div></div>
       </div>
       {selected && <Spotlight trader={selected} />}
     </section>
-    <section className="trust-strip" id="method"><span className="trust-icon"><Icon>shield</Icon></span><div><h2>Institutional anti-fraud standard</h2><p>Read-only broker telemetry, with no screenshots or manual performance claims.</p></div><div className="broker-list"><b>FTMO</b><b>Exness</b><b>IC Markets</b><b>FundedNext</b><b>Binance</b></div></section>
+    <section className="trust-strip" id="method"><span className="trust-icon"><Icon>shield</Icon></span><div><h2>Institutional anti-fraud standard</h2><p>Ranking eligibility will require read-only broker telemetry from a supported provider; screenshots and manual performance claims are not verification.</p></div><div className="broker-list"><b>Provider integrations</b><b>Not configured</b></div></section>
     <footer className="footer"><span>© 2026 SomaliTraders Rank</span><span>Demo interface · Sample data, not financial advice</span><Link to="/admin">Admin console</Link><Link to="/dashboard">Trader portal</Link></footer>
   </main>;
 }
@@ -106,7 +106,6 @@ function Spotlight({ trader }: { trader: Trader }) {
 function Register() {
   const [step, setStep] = useState(1);
   const [accountType, setAccountType] = useState<"forex" | "crypto">("forex");
-  const [accountCategory, setAccountCategory] = useState<"live" | "prop">("live");
   const [showBalance, setShowBalance] = useState(false);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -146,12 +145,11 @@ function Register() {
       const platform = formData.get("platform") === "MT4" ? "MT4" : "MT5";
       setAccountDetails({
         type: "forex",
-        category: accountCategory,
-        propFirm: String(formData.get("propFirm") ?? ""),
         platform,
         brokerName: String(formData.get("brokerName") ?? ""),
         server: String(formData.get("server") ?? ""),
         accountNumber: String(formData.get("accountNumber") ?? ""),
+        currency: String(formData.get("currency") ?? "").toUpperCase(),
         showBalance: visibleBalance
       });
     } else {
@@ -218,17 +216,17 @@ function Register() {
             <div className="form-actions"><span>Next: account details</span><button className="button button-primary" type="submit">Continue <Icon>arrow_forward</Icon></button></div>
           </form>}
           {step === 2 && <form className="registration-form" onSubmit={continueAccount}>
-            <div className="form-section-title"><span>02</span><div><h2>Connect a trading account</h2><p>Choose your account type and add non-secret account details.</p></div></div>
+            <div className="form-section-title"><span>02</span><div><h2>Trading account information</h2><p>Enter your MT4/MT5 account details. Account type is determined by the broker, never selected here.</p></div></div>
             <div className="account-kind-tabs"><button type="button" onClick={() => setAccountType("forex")} className={accountType === "forex" ? "selected" : ""}><Icon>candlestick_chart</Icon> Forex / Prop firm</button><button type="button" onClick={() => setAccountType("crypto")} className={accountType === "crypto" ? "selected" : ""}><Icon>currency_bitcoin</Icon> Crypto</button></div>
-            {accountType === "forex" ? <div className="form-grid"><fieldset className="form-field full-span"><legend>Account category</legend><label className="radio-option"><input type="radio" name="category" checked={accountCategory === "live"} onChange={() => setAccountCategory("live")} /> Live real account</label><label className="radio-option"><input type="radio" name="category" checked={accountCategory === "prop"} onChange={() => setAccountCategory("prop")} /> Prop firm funded account</label></fieldset>{accountCategory === "prop" && <label>Prop firm<select name="propFirm" defaultValue="" required><option value="" disabled>Select firm</option><option>FTMO</option><option>FundedNext</option><option>The5ers</option><option>Other</option></select></label>}<label>Trading platform<select name="platform" defaultValue="MT5"><option>MT4</option><option>MT5</option></select></label><label>Broker name<input name="brokerName" required placeholder="e.g. Exness, IC Markets" /></label><label>Broker server<input name="server" required placeholder="Exact server name" /></label><label>Account number / login ID<input name="accountNumber" required inputMode="numeric" pattern="[0-9]{4,20}" placeholder="4–20 digits" /></label></div> : <div className="form-grid"><label>Exchange<select name="exchange" defaultValue="" required><option value="" disabled>Select exchange</option><option>Binance</option><option>Bybit</option><option>OKX</option><option>Other</option></select></label><label>Account label<input name="accountLabel" placeholder="Optional label" /></label><div className="secure-connect full-span"><Icon>lock</Icon><div><b>API key connection is not available in this demo</b><p>Do not paste API keys or secrets here. A production integration should use an official authorization flow restricted to read-only access, with withdrawals and trading disabled.</p></div></div></div>}
+            {accountType === "forex" ? <div className="form-grid"><label>Trading platform<select name="platform" defaultValue="MT5"><option>MT4</option><option>MT5</option></select></label><label>Broker name<input name="brokerName" required placeholder="e.g. Exness, IC Markets" /></label><label>Account Login ID<input name="accountNumber" required inputMode="numeric" pattern="[0-9]{4,20}" placeholder="4–20 digits" /></label><label>Broker server<input name="server" required placeholder="Exact server name" /></label><label>Account currency<input name="currency" required autoComplete="off" maxLength={3} pattern="[A-Za-z]{3}" placeholder="e.g. USD" /></label><label className="full-span">Investor Password (Read-Only Access)<input type="password" autoComplete="off" disabled placeholder="Unavailable until a supported provider is configured" aria-describedby="investor-password-help" /><small id="investor-password-help">Enter your MT4/MT5 Investor Password. This allows our platform to retrieve your trading account information and performance history without having permission to execute trades or withdraw funds.</small></label><div className="secure-connect full-span"><Icon>lock</Icon><div><b>Secure provider integration is not configured</b><p>Do not enter or send an investor password. This form is disabled until a supported read-only broker integration and protected credential storage are in place.</p></div></div></div> : <div className="form-grid"><label>Exchange<select name="exchange" defaultValue="" required><option value="" disabled>Select exchange</option><option>Binance</option><option>Bybit</option><option>OKX</option><option>Other</option></select></label><label>Account label<input name="accountLabel" placeholder="Optional label" /></label><div className="secure-connect full-span"><Icon>lock</Icon><div><b>API key connection is not available in this demo</b><p>Do not paste API keys or secrets here. A production integration should use an official authorization flow restricted to read-only access, with withdrawals and trading disabled.</p></div></div></div>}
             <label className="toggle-row"><input name="showBalance" type="checkbox" checked={showBalance} onChange={(event) => setShowBalance(event.target.checked)} /><span><b>Show balance publicly</b><small>When off, the public profile shows performance percentages only.</small></span><span className={`toggle ${showBalance ? "on" : ""}`} aria-hidden="true"><i /></span></label>
-            <div className="secure-connect"><Icon>verified_user</Icon><div><b>Broker credential connection is not enabled</b><p>Never enter an investor password or master password into this prototype. Secure broker authorization must be configured before account verification can work.</p></div></div>
             {registrationError && <p className="form-error" role="alert">{registrationError}</p>}
             <div className="form-actions"><button className="button button-light" onClick={() => setStep(1)} type="button">Back</button><button className="button button-primary" type="submit">Review registration <Icon>arrow_forward</Icon></button></div>
           </form>}
           {step === 3 && <div className="registration-form">
-            <div className="form-section-title"><span>03</span><div><h2>Review &amp; finish</h2><p>Check what this demo will and will not do.</p></div></div>
+            <div className="form-section-title"><span>03</span><div><h2>Review &amp; finish</h2><p>Review the profile and account details before saving.</p></div></div>
             <div className="review-list"><p><Icon>check_circle</Icon> Your profile and account metadata will be saved in Supabase.</p><p><Icon>lock</Icon> Supabase Auth manages your website password; this app does not store it in the profile database.</p><p><Icon>lock</Icon> No investor password, API secret, or exchange key is collected.</p></div>
+            <div className="secure-connect"><Icon>info</Icon><div><b>Account connection is not available yet</b><p>Submitting this form saves account metadata only. It does not connect, verify, synchronize, or rank the trading account. A supported provider is required before those features can be enabled.</p></div></div>
             <div className="secure-connect"><Icon>badge</Icon><div><b>Awards identity review</b><p>Government ID and payout certificates are not uploaded here. A verified, access-controlled review flow must be in place before collecting identity documents.</p></div></div>
             {registrationError && <p className="form-error" role="alert">{registrationError}</p>}
             <div className="form-actions"><button className="button button-light" onClick={() => setStep(2)} type="button">Back</button><button className="button button-primary" disabled={isSubmitting} onClick={finishRegistration} type="button">{isSubmitting ? "Saving…" : "Create account"} <Icon>check</Icon></button></div>
@@ -241,14 +239,12 @@ function Register() {
 }
 
 function TraderDashboard() {
-  const { data, error } = useApi<{ name: string; rank: number; roi: number; pnl: number; drawdown: number; equity: number; verifiedAccounts: number; winRate: number; profitFactor: number; sharpeRatio: number; totalTrades: number; lastSynced: string }>("/api/trader/overview");
+  const { data, error } = useApi<{ status: string; accounts: never[] }>("/api/trader/overview");
   return <main className="portal-page">
     {error && <LoadError message={error} />}
-    <div className="welcome-row"><div><div className="eyebrow">Trader terminal <span className="status-tag">Level 3 verified</span></div><h1>Welcome back, {data?.name ?? "Trader"} <span className="wave">👋</span></h1><p className="subtle"><span className="pulse-dot" /> Last synced {data?.lastSynced ?? "—"} · MT5 investor relay</p></div><button className="button button-light" onClick={(event) => { const button = event.currentTarget; button.disabled = true; button.innerText = "Syncing…"; window.setTimeout(() => { button.disabled = false; button.innerText = "Sync now"; }, 900); }}><Icon>sync</Icon> Sync now</button></div>
-    <section className="metric-grid"><Metric title="National standings" value={`#${data?.rank ?? "—"}`} note="Overall · Top 2.8%" icon="leaderboard" /><Metric title="Verified net ROI · 2026" value={`+${data?.roi ?? "—"}%`} note={`+$${data?.pnl?.toLocaleString() ?? "—"} PnL`} icon="trending_up" green /><Metric title="Risk · max drawdown" value={`${data?.drawdown ?? "—"}%`} note="Low risk tier · safe margin" icon="security" /><Metric title="Tracked equity" value={`$${data?.equity?.toLocaleString() ?? "—"}`} note={`${data?.verifiedAccounts ?? "—"} verified accounts`} icon="account_balance_wallet" /></section>
-    <section className="dashboard-columns"><div className="panel growth-panel"><div className="panel-heading"><div><h2>Equity &amp; balance growth</h2><p>Audited account performance over time</p></div><div className="segmented compact"><button>1M</button><button>3M</button><button className="selected">YTD</button><button>All</button></div></div><div className="big-chart"><svg viewBox="0 0 760 240" preserveAspectRatio="none" role="img" aria-label="Equity and balance growth chart"><defs><linearGradient id="growthFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#0d805b" stopOpacity=".24"/><stop offset="1" stopColor="#0d805b" stopOpacity="0"/></linearGradient></defs><path className="gridline" d="M0 35H760M0 90H760M0 145H760M0 200H760"/><path d="M0 205 C90 196 150 178 230 150 S350 158 410 120 S510 114 575 76 S660 41 760 15 L760 240 L0 240Z" fill="url(#growthFill)"/><path d="M0 205 C90 196 150 178 230 150 S350 158 410 120 S510 114 575 76 S660 41 760 15" fill="none" stroke="#087550" strokeWidth="4" strokeLinecap="round"/></svg><span className="chart-pin">+{data?.roi ?? "—"}% net ROI</span><div className="chart-axis"><span>Jan 01</span><span>Feb 01</span><span>Mar 01</span><span>Today</span></div></div><div className="telemetry"><MetricMini label="Sharpe ratio" value={data?.sharpeRatio ?? "—"} /><MetricMini label="Profit factor" value={data?.profitFactor ?? "—"} /><MetricMini label="Win rate" value={`${data?.winRate ?? "—"}%`} /><MetricMini label="Total trades" value={data?.totalTrades ?? "—"} /></div></div><div className="panel award-panel" id="awards"><div className="eyebrow green">Verified nomination</div><h2>Somali Trader of the Year 2026</h2><div className="progress-title"><span>Criteria fulfilled</span><b>4 / 4 · 100%</b></div><div className="progress"><i /></div><ul className="check-list"><li><Icon>check_circle</Icon><span>Verified read-only accounts<small>2 accounts active</small></span></li><li><Icon>check_circle</Icon><span>30+ closed trades<small>{data?.totalTrades ?? "—"} trades passed</small></span></li><li><Icon>check_circle</Icon><span>Drawdown under 15%<small>{data?.drawdown ?? "—"}% recorded</small></span></li></ul><div className="certified"><Icon>verified_user</Icon> Nomination certified · Gala 2026</div></div></section>
-    <section className="panel accounts-panel" id="accounts"><div className="panel-heading"><div><h2>Connected trading accounts</h2><p>Read-only accounts · sample dashboard data</p></div><button className="button button-primary"><Icon>add</Icon> Connect account</button></div><div className="account-row"><div><span className="platform-square">MT5</span><span><b>Exness Real</b><small>Live personal · verified</small></span></div><b>$12,400.00</b><span className="status-tag">Verified &amp; active</span></div><div className="account-row"><div><span className="platform-square">MT5</span><span><b>FTMO Server</b><small>Prop firm · verified</small></span></div><b>$20,000.00</b><span className="status-tag">Verified &amp; active</span></div></section>
-    <p className="demo-caption">This portal is a UI prototype backed by sample data. No trading account credentials are requested or stored.</p>
+    <div className="welcome-row"><div><div className="eyebrow">Trading account dashboard <span className="status-tag">Not connected</span></div><h1>Your accounts</h1><p className="subtle">No account data is displayed until a supported read-only provider is configured.</p></div></div>
+    <section className="panel accounts-panel" id="accounts"><div className="panel-heading"><div><h2>MT4/MT5 account connection</h2><p>{data?.status === "integration_required" ? "Provider integration required" : "Checking connection availability…"}</p></div><div className="account-actions"><button className="button button-light" disabled title="Unavailable until a provider is configured"><Icon>sync</Icon> Refresh Account Data</button><button className="button button-light" disabled title="There is no connected account to disconnect"><Icon>link_off</Icon> Disconnect Account</button></div></div><div className="secure-connect"><Icon>info</Icon><div><b>Account Type: Pending Verification</b><p>This account is not connected. The project has no licensed MT4/MT5 read-only data provider configured. Do not send an investor password. No account type, balance, performance, or trading history can be verified or included in rankings until one is integrated.</p></div></div></section>
+    <p className="demo-caption">No trading account is connected. Verified Real rankings and award eligibility require confirmation from a supported broker or provider.</p>
   </main>;
 }
 
