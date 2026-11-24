@@ -12,8 +12,8 @@ type Database = {
         Relationships: [];
       };
       trading_accounts: {
-        Row: { id: string; trader_id: string; account_type: string; account_category: string | null; prop_firm: string | null; platform: string | null; broker_name: string | null; server_name: string | null; account_number: string | null; exchange_name: string | null; account_label: string | null; show_balance: boolean; created_at: string };
-        Insert: { id?: string; trader_id: string; account_type: string; account_category?: string | null; prop_firm?: string | null; platform?: string | null; broker_name?: string | null; server_name?: string | null; account_number?: string | null; exchange_name?: string | null; account_label?: string | null; show_balance?: boolean; created_at?: string };
+        Row: { id: string; trader_id: string; account_type: string; account_category: string | null; prop_firm: string | null; platform: string | null; broker_name: string | null; server_name: string | null; account_number: string | null; account_currency: string | null; verification_status: string; verified_account_type: string | null; last_synced_at: string | null; exchange_name: string | null; account_label: string | null; show_balance: boolean; created_at: string };
+        Insert: { id?: string; trader_id: string; account_type: string; account_category?: string | null; prop_firm?: string | null; platform?: string | null; broker_name?: string | null; server_name?: string | null; account_number?: string | null; account_currency?: string | null; verification_status?: string; verified_account_type?: string | null; last_synced_at?: string | null; exchange_name?: string | null; account_label?: string | null; show_balance?: boolean; created_at?: string };
         Update: Partial<Database["public"]["Tables"]["trading_accounts"]["Insert"]>;
         Relationships: [];
       };
