@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { isMetaApiConfigured } from "./config.js";
+import { startTradingAccountConnection } from "./tradingAccounts.js";
 import { getSupabaseClients } from "./supabase.js";
 
 const accountSchema = z.discriminatedUnion("type", [
@@ -9,6 +11,7 @@ const accountSchema = z.discriminatedUnion("type", [
     server: z.string().trim().min(2).max(120),
     accountNumber: z.string().trim().regex(/^\d{4,20}$/),
     currency: z.string().trim().regex(/^[A-Za-z]{3}$/).transform((value) => value.toUpperCase()),
+    investorPassword: z.string().max(256).optional().transform((value) => value === "" ? undefined : value),
     showBalance: z.boolean()
   }).strict(),
   z.object({
@@ -42,6 +45,7 @@ export class DuplicateEmailError extends Error {
 
 export async function registerTrader(input: RegistrationInput) {
   const { auth, database } = getSupabaseClients();
+  const { investorPassword, ...accountToSave } = input.account.type === "forex" ? input.account : { ...input.account, investorPassword: undefined };
   const { data, error } = await auth.auth.signUp({
     email: input.email.toLowerCase(),
     password: input.password,
@@ -69,7 +73,7 @@ export async function registerTrader(input: RegistrationInput) {
     p_phone: input.phone,
     p_region: input.region,
     p_social: input.social,
-    p_account: input.account,
+    p_account: accountToSave,
     p_consent_at: new Date().toISOString()
   });
 
@@ -84,10 +88,47 @@ export async function registerTrader(input: RegistrationInput) {
     throw profileError;
   }
 
+  let tradingAccountId: string | null = null;
+  let connectionStatus: string | null = null;
+  if (accountToSave.type === "forex") {
+    const { data: tradingAccount, error: accountError } = await database
+      .from("trading_accounts")
+      .select("id")
+      .eq("trader_id", data.user.id)
+      .eq("account_number", accountToSave.accountNumber)
+      .maybeSingle();
+    if (accountError) {
+      console.error("Could not retrieve the newly registered trading account.", { traderId: data.user.id });
+      connectionStatus = "connection_failed";
+    } else if (tradingAccount) {
+      tradingAccountId = tradingAccount.id;
+      if (investorPassword && isMetaApiConfigured()) {
+        connectionStatus = "connecting";
+        startTradingAccountConnection(data.user.id, tradingAccount.id, investorPassword);
+      } else if (investorPassword && !isMetaApiConfigured()) {
+        connectionStatus = "integration_not_configured";
+        const { error: statusError } = await database
+          .from("trading_accounts")
+          .update({ connection_status: "integration_not_configured" })
+          .eq("id", tradingAccount.id)
+          .eq("trader_id", data.user.id);
+        if (statusError) {
+          console.error("Could not save MetaApi configuration status.", { traderId: data.user.id });
+        }
+      } else {
+        connectionStatus = isMetaApiConfigured() ? "not_connected" : "integration_not_configured";
+      }
+    }
+  }
+
   return {
     id: data.user.id,
     status: "pending_verification" as const,
-    emailConfirmationRequired: !data.session
+    emailConfirmationRequired: !data.session,
+    accessToken: data.session?.access_token ?? null,
+    refreshToken: data.session?.refresh_token ?? null,
+    tradingAccountId,
+    connectionStatus
   };
 }
 
