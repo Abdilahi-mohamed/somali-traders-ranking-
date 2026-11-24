@@ -27,12 +27,13 @@ function Icon({ children }: { children: string }) {
 }
 
 function Header() {
+  const { data: providerStatus } = useApi<{ configured: boolean }>("/api/metaapi/status");
   return <header className="topbar">
     <Link className="brand" to="/"><span className="brand-mark">ST</span><span>SomaliTraders<span className="green">Rank</span></span></Link>
     <nav className="topnav">
       <NavLink to="/">Leaderboard</NavLink><a href="#awards">Annual Awards</a><a href="#method">How Verification Works</a>
     </nav>
-    <div className="top-actions"><span className="live-pill">Provider setup required</span><Link className="text-link" to="/admin/login">Admin login</Link><Link className="button button-primary small" to="/register">Register <Icon>arrow_forward</Icon></Link></div>
+    <div className="top-actions"><span className="live-pill">{providerStatus ? providerStatus.configured ? "MetaApi configured" : "Integration unavailable" : "Checking integration"}</span><Link className="text-link" to="/admin/login">Admin login</Link><Link className="button button-primary small" to="/register">Register <Icon>arrow_forward</Icon></Link></div>
   </header>;
 }
 
@@ -50,13 +51,23 @@ function App() {
 }
 
 function PortalHeader() {
-  return <header className="portal-header"><Link className="brand" to="/"><span className="brand-mark">ST</span><span>Trader<span className="green">Hub</span></span></Link><nav className="portal-nav"><NavLink to="/dashboard">Overview</NavLink><a href="#accounts">Trading accounts</a><a href="#awards">Awards status</a><NavLink to="/admin">Admin console</NavLink></nav><div className="top-actions"><span className="live-pill">Provider setup required</span><Link className="button button-light small" to="/">Public leaderboard</Link></div></header>;
+  return <header className="portal-header"><Link className="brand" to="/"><span className="brand-mark">ST</span><span>Trader<span className="green">Hub</span></span></Link><nav className="portal-nav"><NavLink to="/dashboard">Overview</NavLink><a href="#accounts">Trading accounts</a><Link to="/#awards">Awards status</Link><NavLink to="/admin">Admin console</NavLink></nav><div className="top-actions"><span className="live-pill">Read-only account data</span><Link className="button button-light small" to="/">Public leaderboard</Link></div></header>;
 }
 
 function useApi<T>(path: string) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState("");
-  useEffect(() => { api<T>(path).then(setData).catch((cause: Error) => setError(cause.message)); }, [path]);
+  useEffect(() => {
+    let active = true;
+    setData(null);
+    setError("");
+    api<T>(path).then((result) => {
+      if (active) setData(result);
+    }).catch((cause: Error) => {
+      if (active) setError(cause.message);
+    });
+    return () => { active = false; };
+  }, [path]);
   return { data, error };
 }
 
@@ -65,45 +76,40 @@ function LoadError({ message }: { message: string }) {
 }
 
 function Leaderboard() {
-  const { data, error } = useApi<{ traders: Trader[]; total: number; verifiedOnline: number }>("/api/leaderboard");
+  const [accountMode, setAccountMode] = useState<"REAL" | "DEMO">("REAL");
+  const { data, error } = useApi<{ traders: Trader[]; total: number }>(accountMode === "REAL" ? "/api/leaderboard" : "/api/demo-leaderboard");
   const [query, setQuery] = useState("");
   const [region, setRegion] = useState("all");
-  const [activeTrader, setActiveTrader] = useState("mustafa");
-  const [timeframe, setTimeframe] = useState("2026");
   const rows = (data?.traders ?? []).filter((trader) => `${trader.name} ${trader.city} ${trader.account} ${trader.platform}`.toLowerCase().includes(query.toLowerCase()))
-    .filter((trader) => region === "all" || trader.city.toLowerCase().includes(region));
-  const selected = rows.find((trader) => trader.id === activeTrader) ?? rows[0];
+    .filter((trader) => region === "all" || trader.city.toLowerCase() === region.toLowerCase());
   return <main className="public-page">
     <section className="ranking-intro">
-      <div><p className="eyebrow">Somalia &amp; global diaspora · 2026</p><h1>Somali Trader Rankings</h1><p>Verified performance, ranked by audited account metrics.</p></div>
+      <div><p className="eyebrow">Somalia &amp; global diaspora</p><h1>Somali Trader Rankings</h1><p>{accountMode === "REAL" ? "Verified Real accounts only, ranked by provider-synchronized ROI." : "Confirmed Demo accounts, displayed separately from official rankings."}</p></div>
       <Link className="button button-primary" to="/register"><Icon>person_add</Icon> Register as a trader</Link>
     </section>
     {error && <LoadError message={error} />}
     <section className="filter-panel">
-      <div className="filter-main"><label className="searchbox"><Icon>search</Icon><input aria-label="Search traders" placeholder="Search trader, broker, or city..." value={query} onChange={(event) => setQuery(event.target.value)} /></label><div className="segmented">{[["month", "This month"], ["2026", "2026 full year"], ["alltime", "All time"]].map(([key, label]) => <button key={key} className={timeframe === key ? "selected" : ""} onClick={() => setTimeframe(key)}>{label}</button>)}</div><select aria-label="Filter by region" value={region} onChange={(event) => setRegion(event.target.value)}><option value="all">All regions</option><option value="hargeisa">Hargeisa</option><option value="mogadishu">Mogadishu</option><option value="borama">Borama</option><option value="garowe">Garowe</option><option value="diaspora">Diaspora</option></select></div>
-      <div className="tag-row"><span className="eyebrow">Account type</span><button className="chip active-chip">All accounts · 142</button><button className="chip">Live real · 84</button><button className="chip">Prop funded · 42</button><button className="chip">Crypto · 16</button><span className="risk-filter"><span className="eyebrow">Risk filter</span><button className="chip">Max DD &lt; 10%</button><button className="chip">Sharpe &gt; 2.0</button></span></div>
+      <div className="filter-main"><label className="searchbox"><Icon>search</Icon><input aria-label="Search traders" placeholder="Search trader, broker, or city..." value={query} onChange={(event) => setQuery(event.target.value)} /></label><select aria-label="Filter by region" value={region} onChange={(event) => setRegion(event.target.value)}><option value="all">All regions</option><option value="boorama">Boorama</option><option value="hargeysa">Hargeysa</option><option value="muqdisho">Muqdisho</option><option value="garoowe">Garoowe</option><option value="qurbaha / diaspora">Qurbaha / Diaspora</option></select></div>
+      <div className="tag-row"><span className="eyebrow">Account type</span><button className={`chip ${accountMode === "REAL" ? "active-chip" : ""}`} onClick={() => setAccountMode("REAL")}>Verified Real · {accountMode === "REAL" ? data?.total ?? "—" : "—"}</button><button className={`chip ${accountMode === "DEMO" ? "active-chip" : ""}`} onClick={() => setAccountMode("DEMO")}>Demo · {accountMode === "DEMO" ? data?.total ?? "—" : "—"}</button></div>
     </section>
-    <section className="leader-layout">
+    <section className="leader-layout single-leader">
       <div className="table-card">
-        <div className="table-heading"><div><h2>Verified Somali Performance Registry</h2><span className="status-tag">{data?.verifiedOnline ?? "—"} verified online</span></div><span className="sync-status">Provider integration pending</span></div>
-        <div className="table-scroll"><table className="leader-table"><thead><tr><th>Rank</th><th>Trader &amp; origin</th><th>Broker architecture</th><th className="right">ROI</th><th className="right">Max DD</th><th className="right">PF</th><th className="right">Win rate</th><th className="right">Audited equity</th><th className="right">Score</th></tr></thead><tbody>
-          {rows.map((trader) => <tr key={trader.id} onClick={() => setActiveTrader(trader.id)} className={activeTrader === trader.id ? "row-selected" : ""}><td><span className={`rank rank-${trader.id}`}>{data!.traders.indexOf(trader) + 1}</span></td><td><div className="person-cell"><span className="avatar">{trader.initials}</span><span><b>{trader.name} <Icon>verified</Icon></b><small>{trader.city}</small></span></div></td><td><b>{trader.account}</b><small>{trader.platform} · Read-only</small></td><td className="right positive">+{trader.roi}%</td><td className="right">{trader.drawdown}%</td><td className="right">{trader.profitFactor}</td><td className="right">{trader.winRate}%</td><td className="right">{trader.equity ? `$${trader.equity.toLocaleString()}` : <span className="hidden-balance"><Icon>lock</Icon> Hidden</span>}</td><td className="right"><span className="score">{trader.score}</span></td></tr>)}
-          {!rows.length && <tr><td className="empty-row" colSpan={9}>No Verified Real accounts are available yet. A supported read-only broker integration is required.</td></tr>}
+        <div className="table-heading"><div><h2>{accountMode === "REAL" ? "Verified Real Trader Ranking" : "Demo Accounts"}</h2><span className="status-tag">{data?.total ?? "—"} accounts</span></div><span className="sync-status">MetaApi data only</span></div>
+        <div className="table-scroll"><table className="leader-table"><thead><tr><th>Rank</th><th>Trader &amp; origin</th><th>Broker / platform</th><th className="right">ROI</th><th className="right">Total PNL</th><th className="right">Observed Max DD</th><th className="right">Win rate</th><th className="right">Equity</th></tr></thead><tbody>
+          {rows.map((trader, index) => <tr key={trader.id}><td><span className="rank">{index + 1}</span></td><td><div className="person-cell"><span className="avatar">{trader.initials}</span><span><b>{trader.name}</b><small>{trader.city}</small></span></div></td><td><b>{trader.account}</b><small>{trader.platform} · Read-only</small></td><td className={`right ${trader.roi >= 0 ? "positive" : "negative"}`}>{trader.roi.toFixed(2)}%</td><td className="right">{trader.pnl == null ? "—" : `${trader.pnl.toLocaleString()} ${trader.currency ?? ""}`}</td><td className="right">{trader.drawdown == null ? "—" : `${trader.drawdown.toFixed(2)}%`}</td><td className="right">{trader.winRate == null ? "—" : `${trader.winRate.toFixed(2)}%`}</td><td className="right">{trader.equity == null ? "—" : `${trader.equity.toLocaleString()} ${trader.currency ?? ""}`}</td></tr>)}
+          {!rows.length && <tr><td className="empty-row" colSpan={8}>{accountMode === "REAL" ? "No Verified Real accounts are available yet. Only accounts confirmed by MetaApi qualify." : "No confirmed Demo accounts are available."}</td></tr>}
         </tbody></table></div>
-        <div className="table-footer"><span>Showing {rows.length} of {data?.total ?? "—"} verified operators</span><div><button aria-label="Previous page" disabled>‹</button><span>Page 1 of 18</span><button aria-label="Next page">›</button></div></div>
+        <div className="table-footer"><span>Showing {rows.length} of {data?.total ?? "—"} {accountMode === "REAL" ? "Verified Real accounts" : "Demo accounts"}</span></div>
       </div>
-      {selected && <Spotlight trader={selected} />}
     </section>
-    <section className="trust-strip" id="method"><span className="trust-icon"><Icon>shield</Icon></span><div><h2>Institutional anti-fraud standard</h2><p>Ranking eligibility will require read-only broker telemetry from a supported provider; screenshots and manual performance claims are not verification.</p></div><div className="broker-list"><b>Provider integrations</b><b>Not configured</b></div></section>
-    <footer className="footer"><span>© 2026 SomaliTraders Rank</span><span>Demo interface · Sample data, not financial advice</span><Link to="/admin">Admin console</Link><Link to="/dashboard">Trader portal</Link></footer>
+    <section className="trust-strip" id="method"><span className="trust-icon"><Icon>shield</Icon></span><div><h2>Read-only verification</h2><p>Only accounts confirmed by MetaApi as REAL are listed in the official ranking. Account screenshots and manual performance claims do not qualify.</p></div><div className="broker-list"><b>Provider integrations</b><b>MetaApi</b></div></section>
+    <section className="trust-strip" id="awards"><span className="trust-icon"><Icon>emoji_events</Icon></span><div><h2>Annual Global Trader Awards</h2><p>Only Verified Real accounts are eligible. Demo and unverified accounts are excluded; award scoring will remain unavailable until formal criteria are configured.</p></div></section>
+    <footer className="footer"><span>© 2026 SomaliTraders Rank</span><span>Provider-synchronized metrics · Not financial advice</span><Link to="/admin">Admin console</Link><Link to="/dashboard">Trader portal</Link></footer>
   </main>;
 }
 
-function Spotlight({ trader }: { trader: Trader }) {
-  return <aside className="spotlight"><div className="accent-bar" /><div className="spotlight-person"><span className="avatar avatar-large">{trader.initials}</span><div><h2>{trader.name} <Icon>verified</Icon></h2><p>{trader.city} · Verified trader</p></div><span className="score">Score {trader.score}</span></div><div className="strategy-tags"><span>Consistent returns</span><span>{trader.platform}</span><span>Audited</span></div><div className="chart-box"><div className="chart-title"><b>Audited equity trajectory</b><strong>+{trader.roi}%</strong></div><svg viewBox="0 0 360 112" role="img" aria-label="Rising audited equity line chart"><defs><linearGradient id="chartFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#0d805b" stopOpacity=".24" /><stop offset="1" stopColor="#0d805b" stopOpacity="0" /></linearGradient></defs><path d="M0 94 L35 83 L78 85 L120 61 L160 69 L205 44 L242 50 L280 24 L322 31 L360 9 L360 112 L0 112Z" fill="url(#chartFill)" /><path d="M0 94 L35 83 L78 85 L120 61 L160 69 L205 44 L242 50 L280 24 L322 31 L360 9" fill="none" stroke="#087550" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /><circle cx="360" cy="9" r="4" fill="#087550" /></svg><div className="chart-axis"><span>Jan 2026</span><span>Mar 2026</span></div></div><div className="spotlight-metrics"><span><small>Drawdown</small><b>{trader.drawdown}%</b></span><span><small>Profit factor</small><b>{trader.profitFactor}</b></span><span><small>Win rate</small><b>{trader.winRate}%</b></span></div><div className="proof"><b><Icon>verified_user</Icon> Cryptographic proof stamp</b><p>Account telemetry is verified through read-only broker connections.</p></div><button className="button button-primary full-width">Inspect trading journal <Icon>arrow_forward</Icon></button></aside>;
-}
-
 function Register() {
+  const { data: metaApiStatus } = useApi<{ configured: boolean; status: string; message: string }>("/api/metaapi/status");
   const [step, setStep] = useState(1);
   const [accountType, setAccountType] = useState<"forex" | "crypto">("forex");
   const [showBalance, setShowBalance] = useState(false);
@@ -117,6 +123,9 @@ function Register() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [registeredId, setRegisteredId] = useState("");
   const [emailConfirmationRequired, setEmailConfirmationRequired] = useState(false);
+  const [investorPassword, setInvestorPassword] = useState("");
+  const [connectOnRegistration, setConnectOnRegistration] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState("");
 
   function continueProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -140,6 +149,8 @@ function Register() {
   function continueAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    setConnectOnRegistration(submitter instanceof HTMLButtonElement && submitter.value === "connect");
     const visibleBalance = formData.get("showBalance") === "on";
     if (accountType === "forex") {
       const platform = formData.get("platform") === "MT4" ? "MT4" : "MT5";
@@ -179,7 +190,14 @@ function Register() {
       const response = await fetch("/api/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...profile, password, consent: true, account: accountDetails })
+        body: JSON.stringify({
+          ...profile,
+          password,
+          consent: true,
+          account: accountDetails.type === "forex" && connectOnRegistration && investorPassword && metaApiStatus?.configured
+            ? { ...accountDetails, investorPassword }
+            : accountDetails
+        })
       });
       const result = await response.json() as Record<string, unknown>;
       if (!response.ok) {
@@ -190,8 +208,12 @@ function Register() {
       }
       setRegisteredId(result.id);
       setEmailConfirmationRequired(result.emailConfirmationRequired === true);
+      setConnectionStatus(typeof result.connectionStatus === "string" ? result.connectionStatus : "not_connected");
+      if (typeof result.accessToken === "string") sessionStorage.setItem("traderAccessToken", result.accessToken);
+      if (typeof result.refreshToken === "string") sessionStorage.setItem("traderRefreshToken", result.refreshToken);
       setPassword("");
       setConfirmPassword("");
+      setInvestorPassword("");
       setSubmitted(true);
     } catch (error) {
       setRegistrationError(error instanceof Error ? error.message : "Registration could not be completed.");
@@ -207,7 +229,7 @@ function Register() {
         <div className="registration-steps" aria-label="Registration steps">
           {[["1", "Profile"], ["2", "Trading account"], ["3", "Review"]].map(([number, label], index) => <div className={`registration-step ${step === index + 1 ? "current" : ""} ${step > index + 1 ? "complete" : ""}`} key={number}><span>{step > index + 1 ? "✓" : number}</span>{label}</div>)}
         </div>
-        {submitted ? <div className="registration-result" role="status"><span className="result-icon"><Icon>check_circle</Icon></span><h2>Registration received</h2><p>Your profile is saved and pending review. {emailConfirmationRequired ? "Check your email to confirm your address." : ""} Keep your registration reference: <code>{registeredId}</code>.</p><Link className="button button-primary" to="/">View leaderboard</Link></div> : <>
+        {submitted ? <div className="registration-result" role="status"><span className="result-icon"><Icon>{connectionStatus === "connecting" ? "sync" : "check_circle"}</Icon></span><h2>Registration received</h2><p>Your profile is saved. {emailConfirmationRequired ? "Check your email to confirm your address. " : ""}Account connection status: <b>{connectionStatus.replace(/_/g, " ")}</b>. Registration was not blocked by connection availability. Keep your registration reference: <code>{registeredId}</code>.</p><Link className="button button-primary" to="/dashboard">Trading account settings</Link></div> : <>
           {step === 1 && <form className="registration-form" onSubmit={continueProfile}>
             <div className="form-section-title"><span>01</span><div><h2>Your public profile</h2><p>These details identify your trader profile.</p></div></div>
             <div className="form-grid"><label>Full name<input name="fullName" autoComplete="name" defaultValue={profile?.fullName ?? ""} required placeholder="Your full name" /></label><label>Trading alias<input name="alias" defaultValue={profile?.alias ?? ""} required placeholder="Name shown on leaderboard" /></label><label>Email address<input name="email" type="email" autoComplete="email" defaultValue={profile?.email ?? ""} required placeholder="you@example.com" /></label><label>Phone / WhatsApp<input name="phone" type="tel" autoComplete="tel" defaultValue={profile?.phone ?? ""} required placeholder="+252 63 000 0000" /></label><label>City / region<select name="region" defaultValue={profile?.region ?? ""} required><option value="" disabled>Select your region</option><option>Boorama</option><option>Hargeysa</option><option>Muqdisho</option><option>Garoowe</option><option>Qurbaha / Diaspora</option></select></label><label>Telegram or social profile <span className="optional">Optional</span><input name="social" defaultValue={profile?.social ?? ""} placeholder="@username or profile URL" /></label><label>Create website password<input name="password" type="password" autoComplete="new-password" minLength={10} required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 10 characters" /></label><label>Confirm password<input name="confirmPassword" type="password" autoComplete="new-password" minLength={10} required value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Enter it again" /></label></div>
@@ -218,15 +240,15 @@ function Register() {
           {step === 2 && <form className="registration-form" onSubmit={continueAccount}>
             <div className="form-section-title"><span>02</span><div><h2>Trading account information</h2><p>Enter your MT4/MT5 account details. Account type is determined by the broker, never selected here.</p></div></div>
             <div className="account-kind-tabs"><button type="button" onClick={() => setAccountType("forex")} className={accountType === "forex" ? "selected" : ""}><Icon>candlestick_chart</Icon> Forex / Prop firm</button><button type="button" onClick={() => setAccountType("crypto")} className={accountType === "crypto" ? "selected" : ""}><Icon>currency_bitcoin</Icon> Crypto</button></div>
-            {accountType === "forex" ? <div className="form-grid"><label>Trading platform<select name="platform" defaultValue="MT5"><option>MT4</option><option>MT5</option></select></label><label>Broker name<input name="brokerName" required placeholder="e.g. Exness, IC Markets" /></label><label>Account Login ID<input name="accountNumber" required inputMode="numeric" pattern="[0-9]{4,20}" placeholder="4–20 digits" /></label><label>Broker server<input name="server" required placeholder="Exact server name" /></label><label>Account currency<input name="currency" required autoComplete="off" maxLength={3} pattern="[A-Za-z]{3}" placeholder="e.g. USD" /></label><label className="full-span">Investor Password (Read-Only Access)<input type="password" autoComplete="off" disabled placeholder="Unavailable until a supported provider is configured" aria-describedby="investor-password-help" /><small id="investor-password-help">Enter your MT4/MT5 Investor Password. This allows our platform to retrieve your trading account information and performance history without having permission to execute trades or withdraw funds.</small></label><div className="secure-connect full-span"><Icon>lock</Icon><div><b>Secure provider integration is not configured</b><p>Do not enter or send an investor password. This form is disabled until a supported read-only broker integration and protected credential storage are in place.</p></div></div></div> : <div className="form-grid"><label>Exchange<select name="exchange" defaultValue="" required><option value="" disabled>Select exchange</option><option>Binance</option><option>Bybit</option><option>OKX</option><option>Other</option></select></label><label>Account label<input name="accountLabel" placeholder="Optional label" /></label><div className="secure-connect full-span"><Icon>lock</Icon><div><b>API key connection is not available in this demo</b><p>Do not paste API keys or secrets here. A production integration should use an official authorization flow restricted to read-only access, with withdrawals and trading disabled.</p></div></div></div>}
+            {accountType === "forex" ? <div className="form-grid"><label>Trading platform<select name="platform" defaultValue="MT5"><option>MT4</option><option>MT5</option></select></label><label>Broker name<input name="brokerName" required placeholder="e.g. Exness, IC Markets" /></label><label>Account Login ID<input name="accountNumber" required inputMode="numeric" pattern="[0-9]{4,20}" placeholder="4–20 digits" /></label><label>Broker server<input name="server" required placeholder="Exact server name" /></label><label>Account currency<input name="currency" required autoComplete="off" maxLength={3} pattern="[A-Za-z]{3}" placeholder="e.g. USD" /></label><label className="full-span">Investor Password (Optional – Read-Only Access)<input type="password" name="investorPassword" autoComplete="off" maxLength={256} value={investorPassword} onChange={(event) => setInvestorPassword(event.target.value)} aria-describedby="investor-password-help" /><small id="investor-password-help">Enter your MT4/MT5 Investor Password to securely connect your trading account and retrieve its available balance, equity, trading history, and performance statistics. This access is intended for read-only monitoring and does not authorize trading or withdrawals.</small></label><div className={`secure-connect full-span ${metaApiStatus && !metaApiStatus.configured ? "integration-unavailable" : ""}`} aria-live="polite"><Icon>{metaApiStatus?.configured ? "verified_user" : "info"}</Icon><div><b>{metaApiStatus ? metaApiStatus.configured ? "MetaApi integration configured" : "Integration Not Configured" : "Checking MetaApi integration status…"}</b><p>{metaApiStatus?.message ?? "Checking MetaApi integration status…"}</p></div></div></div> : <div className="form-grid"><label>Exchange<select name="exchange" defaultValue="" required><option value="" disabled>Select exchange</option><option>Binance</option><option>Bybit</option><option>OKX</option><option>Other</option></select></label><label>Account label<input name="accountLabel" placeholder="Optional label" /></label><div className="secure-connect full-span"><Icon>lock</Icon><div><b>API key connection is not available in this demo</b><p>Do not paste API keys or secrets here. A production integration should use an official authorization flow restricted to read-only access, with withdrawals and trading disabled.</p></div></div></div>}
             <label className="toggle-row"><input name="showBalance" type="checkbox" checked={showBalance} onChange={(event) => setShowBalance(event.target.checked)} /><span><b>Show balance publicly</b><small>When off, the public profile shows performance percentages only.</small></span><span className={`toggle ${showBalance ? "on" : ""}`} aria-hidden="true"><i /></span></label>
             {registrationError && <p className="form-error" role="alert">{registrationError}</p>}
-            <div className="form-actions"><button className="button button-light" onClick={() => setStep(1)} type="button">Back</button><button className="button button-primary" type="submit">Review registration <Icon>arrow_forward</Icon></button></div>
+            <div className="form-actions"><button className="button button-light" onClick={() => setStep(1)} type="button">Back</button><button className="button button-primary" type="submit" name="connectionIntent" value="connect">Connect Trading Account <Icon>link</Icon></button><button className="button button-light" type="submit" name="connectionIntent" value="later">Connect Later <Icon>arrow_forward</Icon></button></div>
           </form>}
           {step === 3 && <div className="registration-form">
             <div className="form-section-title"><span>03</span><div><h2>Review &amp; finish</h2><p>Review the profile and account details before saving.</p></div></div>
-            <div className="review-list"><p><Icon>check_circle</Icon> Your profile and account metadata will be saved in Supabase.</p><p><Icon>lock</Icon> Supabase Auth manages your website password; this app does not store it in the profile database.</p><p><Icon>lock</Icon> No investor password, API secret, or exchange key is collected.</p></div>
-            <div className="secure-connect"><Icon>info</Icon><div><b>Account connection is not available yet</b><p>Submitting this form saves account metadata only. It does not connect, verify, synchronize, or rank the trading account. A supported provider is required before those features can be enabled.</p></div></div>
+            <div className="review-list"><p><Icon>check_circle</Icon> Your profile and account metadata will be saved in Supabase.</p><p><Icon>lock</Icon> Supabase Auth manages your website password; this app does not store it in the profile database.</p><p><Icon>lock</Icon> The Investor Password is sent only to the backend when MetaApi is configured and you chose Connect Trading Account. It is not stored in this platform's database.</p></div>
+            <div className="secure-connect"><Icon>{connectOnRegistration && investorPassword && metaApiStatus?.configured ? "sync" : "info"}</Icon><div><b>{connectOnRegistration && investorPassword && metaApiStatus?.configured ? "MetaApi will connect after registration" : "You can connect later"}</b><p>{connectOnRegistration && investorPassword && metaApiStatus?.configured ? "Registration completes independently; connection status will be reported separately." : metaApiStatus?.message ?? "You can finish registration without connecting a trading account."}</p></div></div>
             <div className="secure-connect"><Icon>badge</Icon><div><b>Awards identity review</b><p>Government ID and payout certificates are not uploaded here. A verified, access-controlled review flow must be in place before collecting identity documents.</p></div></div>
             {registrationError && <p className="form-error" role="alert">{registrationError}</p>}
             <div className="form-actions"><button className="button button-light" onClick={() => setStep(2)} type="button">Back</button><button className="button button-primary" disabled={isSubmitting} onClick={finishRegistration} type="button">{isSubmitting ? "Saving…" : "Create account"} <Icon>check</Icon></button></div>
@@ -239,13 +261,238 @@ function Register() {
 }
 
 function TraderDashboard() {
-  const { data, error } = useApi<{ status: string; accounts: never[] }>("/api/trader/overview");
+  type Account = {
+    id: string;
+    platform: string | null;
+    broker_name: string | null;
+    server_name: string | null;
+    account_number: string | null;
+    account_currency: string | null;
+    connection_status: string;
+    connection_message: string | null;
+    verified_account_type: string | null;
+    ownership_verified: boolean | null;
+    has_connection: boolean;
+    balance: number | null;
+    equity: number | null;
+    total_pnl: number | null;
+    roi: number | null;
+    win_rate: number | null;
+    maximum_drawdown: number | null;
+    last_successful_sync_at: string | null;
+  };
+  const [accessToken, setAccessToken] = useState(() => sessionStorage.getItem("traderAccessToken") ?? "");
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [email, setEmail] = useState("");
+  const [websitePassword, setWebsitePassword] = useState("");
+  const [investorPassword, setInvestorPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [busyAccount, setBusyAccount] = useState("");
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [reloadId, setReloadId] = useState(0);
+  const { data: providerStatus } = useApi<{ configured: boolean; message: string }>("/api/metaapi/status");
+
+  useEffect(() => {
+    if (!accessToken) {
+      setAccounts([]);
+      return;
+    }
+    let active = true;
+    let timer: number | undefined;
+    async function loadAccounts() {
+      setLoading(true);
+      try {
+        const response = await fetch("/api/trader/accounts", {
+          credentials: "include",
+          headers: { Authorization: `Bearer ${accessToken}` }
+        });
+        if (response.status === 401) {
+          sessionStorage.removeItem("traderAccessToken");
+          sessionStorage.removeItem("traderRefreshToken");
+          if (active) setAccessToken("");
+          return;
+        }
+        const result = await response.json() as { accounts?: Account[]; error?: string };
+        if (!response.ok) throw new Error(result.error ?? "Could not load trading accounts.");
+        if (active) {
+          setError("");
+          const nextAccounts = result.accounts ?? [];
+          setAccounts(nextAccounts);
+          if (nextAccounts.some((account) => account.connection_status === "connecting")) {
+            timer = window.setTimeout(loadAccounts, 3000);
+          }
+        }
+      } catch (cause) {
+        if (active) setError(cause instanceof Error ? cause.message : "Could not load trading accounts.");
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+    void loadAccounts();
+    return () => {
+      active = false;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [accessToken, reloadId]);
+
+  async function signIn(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    try {
+      const response = await fetch("/api/trader/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password: websitePassword })
+      });
+      const result = await response.json() as { accessToken?: string; refreshToken?: string; error?: string };
+      if (!response.ok || !result.accessToken) throw new Error(result.error ?? "Sign-in failed.");
+      sessionStorage.setItem("traderAccessToken", result.accessToken);
+      if (result.refreshToken) sessionStorage.setItem("traderRefreshToken", result.refreshToken);
+      setWebsitePassword("");
+      setAccessToken(result.accessToken);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Sign-in failed.");
+    }
+  }
+
+  async function accountAction(accountId: string, action: "connect" | "refresh" | "disconnect") {
+    if (action === "disconnect" && !window.confirm("Disconnect this trading account and remove its MetaApi connection?")) return;
+    setError("");
+    setNotice("");
+    setBusyAccount(accountId);
+    try {
+      const response = await fetch(`/api/trader/accounts/${encodeURIComponent(accountId)}/${action}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`
+        },
+        body: action === "connect" ? JSON.stringify({ investorPassword }) : undefined
+      });
+      const result = await response.json() as { status?: string; error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Account action failed.");
+      setNotice(result.status ? `Account status: ${result.status.replace(/_/g, " ")}.` : "Account updated.");
+      setInvestorPassword("");
+      setReloadId((current) => current + 1);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Account action failed.");
+    } finally {
+      setBusyAccount("");
+    }
+  }
+
+  function signOut() {
+    sessionStorage.removeItem("traderAccessToken");
+    sessionStorage.removeItem("traderRefreshToken");
+    setAccessToken("");
+  }
+
+  const statusLabel = (status: string) => status.replace(/_/g, " ").replace(/\b\w/g, (letter: string) => letter.toUpperCase());
+  const canDisconnect = (account: Account) => account.has_connection && !["connecting", "disconnected"].includes(account.connection_status);
+  const canRefresh = (account: Account) => providerStatus?.configured && account.has_connection &&
+    ["connected", "verified_real", "demo_account", "pending_verification"].includes(account.connection_status);
+  const formatMoney = (value: number | null, currency: string | null) => value === null ? "—" : `${value.toLocaleString()} ${currency ?? ""}`.trim();
+
   return <main className="portal-page">
-    {error && <LoadError message={error} />}
-    <div className="welcome-row"><div><div className="eyebrow">Trading account dashboard <span className="status-tag">Not connected</span></div><h1>Your accounts</h1><p className="subtle">No account data is displayed until a supported read-only provider is configured.</p></div></div>
-    <section className="panel accounts-panel" id="accounts"><div className="panel-heading"><div><h2>MT4/MT5 account connection</h2><p>{data?.status === "integration_required" ? "Provider integration required" : "Checking connection availability…"}</p></div><div className="account-actions"><button className="button button-light" disabled title="Unavailable until a provider is configured"><Icon>sync</Icon> Refresh Account Data</button><button className="button button-light" disabled title="There is no connected account to disconnect"><Icon>link_off</Icon> Disconnect Account</button></div></div><div className="secure-connect"><Icon>info</Icon><div><b>Account Type: Pending Verification</b><p>This account is not connected. The project has no licensed MT4/MT5 read-only data provider configured. Do not send an investor password. No account type, balance, performance, or trading history can be verified or included in rankings until one is integrated.</p></div></div></section>
-    <p className="demo-caption">No trading account is connected. Verified Real rankings and award eligibility require confirmation from a supported broker or provider.</p>
+    <div className="welcome-row"><div><div className="eyebrow">Trading account dashboard</div><h1>Your accounts</h1><p className="subtle">MetaApi investor-mode confirmation is required before an account can be ranked.</p></div>{accessToken && <button className="button button-light" onClick={signOut}><Icon>logout</Icon> Sign out</button>}</div>
+    {error && <p className="form-error" role="alert">{error}</p>}
+    {notice && <p className="notice" role="status">{notice}</p>}
+    {!accessToken ? <section className="panel admin-login-panel">
+      <div className="form-section-title"><span><Icon>lock</Icon></span><div><h2>Trader sign-in</h2><p>Sign in to manage your own trading accounts.</p></div></div>
+      <form className="admin-login-form" onSubmit={signIn}>
+        <label>Email address<input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+        <label>Website password<input type="password" autoComplete="current-password" required value={websitePassword} onChange={(event) => setWebsitePassword(event.target.value)} /></label>
+        <button className="button button-primary" type="submit">Sign in</button>
+      </form>
+    </section> : loading && !accounts.length ? <div className="notice">Loading trading accounts…</div> : accounts.length ? accounts.map((account) => {
+      const summary: Array<[string, string]> = [
+        ["Account Type", account.verified_account_type ?? (account.connection_status === "demo_account" ? "DEMO" : "Pending Verification")],
+        ["Balance", formatMoney(account.balance, account.account_currency)],
+        ["Equity", formatMoney(account.equity, account.account_currency)],
+        ["Total PNL", formatMoney(account.total_pnl, account.account_currency)],
+        ["ROI", account.roi === null ? "—" : `${account.roi.toFixed(2)}%`],
+        ["Win Rate", account.win_rate === null ? "—" : `${account.win_rate.toFixed(2)}%`],
+        ["Observed Maximum Drawdown", account.maximum_drawdown === null ? "—" : `${account.maximum_drawdown.toFixed(2)}%`],
+        ["Last Successful Synchronization", account.last_successful_sync_at ? new Date(account.last_successful_sync_at).toLocaleString() : "—"]
+      ];
+      return <section className="panel accounts-panel" id="accounts" key={account.id}>
+        <div className="panel-heading">
+          <div><h2>{account.broker_name ?? "Trading account"} · {account.platform ?? "MT4/MT5"}</h2><p>Login {account.account_number ?? "—"} · {account.server_name ?? "—"}</p></div>
+          <span className={`status-tag ${account.connection_status === "connection_failed" ? "flagged" : account.connection_status === "pending_verification" ? "pending" : ""}`}>{statusLabel(account.connection_status)}</span>
+        </div>
+        <div className="account-summary-grid">{summary.map(([label, value]) => <div key={label}><small>{label}</small><b>{value}</b></div>)}</div>
+        <div className="account-settings">
+          {account.connection_message && <p className="form-error" role="status">{account.connection_message}</p>}
+          {account.connection_status === "pending_verification" && account.ownership_verified !== true && <p className="secure-connect"><Icon>info</Icon><span>{account.ownership_verified === false ? "The provider account holder name could not be matched to your profile." : "Account ownership has not been verified."} This account remains Pending Verification and is excluded from rankings. Contact support if your broker's name format differs.</span></p>}
+          {account.connection_status === "pending_verification" && account.ownership_verified === true && !account.verified_account_type && <p className="secure-connect"><Icon>info</Icon><span>MetaApi did not provide an authoritative account mode. This account remains Pending Verification and is excluded from rankings.</span></p>}
+          <label>Investor Password (Optional – Read-Only Access)
+            <input type="password" autoComplete="off" maxLength={256} value={investorPassword} onChange={(event) => setInvestorPassword(event.target.value)} />
+            <small>Enter your MT4/MT5 Investor Password to securely connect your trading account and retrieve its available balance, equity, trading history, and performance statistics. This access is intended for read-only monitoring and does not authorize trading or withdrawals.</small>
+          </label>
+          {providerStatus && !providerStatus.configured && <div className="secure-connect integration-unavailable"><Icon>info</Icon><div><b>Integration Not Configured</b><p>{providerStatus.message}</p></div></div>}
+          {!account.has_connection && <p className="subtle">Credentials are sent to MetaApi by the backend and are not stored in this platform's database.</p>}
+          <div className="account-actions">
+            <button className="button button-primary" disabled={!providerStatus?.configured || busyAccount === account.id || account.connection_status === "connecting" || !investorPassword} onClick={() => accountAction(account.id, "connect")}><Icon>link</Icon> {account.has_connection ? "Replace Credentials" : "Connect Trading Account"}</button>
+            <button className="button button-light" disabled={busyAccount === account.id || !canRefresh(account)} onClick={() => accountAction(account.id, "refresh")}><Icon>sync</Icon> Refresh Account Data</button>
+            <button className="button button-light" disabled={busyAccount === account.id || !canDisconnect(account)} onClick={() => accountAction(account.id, "disconnect")}><Icon>link_off</Icon> Disconnect Account</button>
+          </div>
+          {busyAccount === account.id && <p className="subtle" role="status"><span className="loading-spinner" /> Connecting…</p>}
+        </div>
+        {canRefresh(account) && <OpenPositions accountId={account.id} accessToken={accessToken} />}
+      </section>;
+    }) : <section className="panel accounts-panel"><div className="panel-heading"><div><h2>No trading accounts found</h2><p>Complete registration to add your MT4/MT5 account metadata.</p></div><Link className="button button-primary" to="/register">Register as a trader</Link></div></section>}
   </main>;
+}
+
+function OpenPositions({ accountId, accessToken }: { accountId: string; accessToken: string }) {
+  type Position = {
+    position_id: string;
+    position_type: string;
+    symbol: string;
+    volume: number;
+    opened_at: string;
+    open_price: number;
+    current_price: number | null;
+    profit: number | null;
+    swap: number | null;
+  };
+  const [positions, setPositions] = useState<Position[] | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  async function togglePositions() {
+    if (expanded) {
+      setExpanded(false);
+      return;
+    }
+    if (!positions) {
+      setLoading(true);
+      setError("");
+      try {
+        const response = await fetch(`/api/trader/accounts/${encodeURIComponent(accountId)}/positions`, {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        });
+        const result = await response.json() as { positions?: Position[]; error?: string };
+        if (!response.ok) throw new Error(result.error ?? "Could not load open positions.");
+        setPositions(result.positions ?? []);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Could not load open positions.");
+      } finally {
+        setLoading(false);
+      }
+    }
+    setExpanded(true);
+  }
+
+  return <div className="open-positions">
+    <button className="button button-light" onClick={togglePositions} disabled={loading}>
+      <Icon>list_alt</Icon> {loading ? "Loading…" : expanded ? "Hide Open Positions" : "View Open Positions"}
+    </button>
+    {error && <p className="form-error" role="alert">{error}</p>}
+    {expanded && positions && (positions.length ? <div className="table-scroll"><table className="admin-table"><thead><tr><th>Symbol</th><th>Side</th><th>Volume</th><th>Open Price</th><th>Current Price</th><th>Profit</th><th>Opened</th></tr></thead><tbody>{positions.map((position) => <tr key={position.position_id}><td>{position.symbol}</td><td>{position.position_type.replace(/^POSITION_TYPE_/, "")}</td><td>{position.volume}</td><td>{position.open_price}</td><td>{position.current_price ?? "—"}</td><td>{position.profit == null ? "—" : `${position.profit.toLocaleString()}${position.swap == null ? "" : ` · swap ${position.swap.toLocaleString()}`}`}</td><td>{new Date(position.opened_at).toLocaleString()}</td></tr>)}</tbody></table></div> : <p className="subtle">No open positions were returned for this account.</p>)}
+  </div>;
 }
 
 function Metric({ title, value, note, icon, green = false }: { title: string; value: string; note: string; icon: string; green?: boolean }) {
@@ -258,7 +505,14 @@ function MetricMini({ label, value }: { label: string; value: string | number })
 
 function AdminConsole() {
   const navigate = useNavigate();
-  const { data, error } = useApi<{ registeredTraders: number; verifiedTraders: number; pendingVerifications: number; flaggedAccounts: number; workerUptime: number; accounts: Array<{ name: string; city: string; email: string; broker: string; id: string; type: string; roi: number; drawdown: number; audit: string; status: string }> }>("/api/admin/overview");
+  const { data, error } = useApi<{
+    registeredTraders: number;
+    verifiedTraders: number;
+    pendingVerifications: number;
+    flaggedAccounts: number;
+    synchronizationEnabled: boolean;
+    accounts: Array<{ name: string; city: string; email: string; broker: string; id: string; type: string; roi: number | null; drawdown: number | null; audit: string; status: string }>;
+  }>("/api/admin/overview");
   const [filter, setFilter] = useState("All");
   const [logoutError, setLogoutError] = useState("");
   const accounts = (data?.accounts ?? []).filter((account) => filter === "All" || account.status === filter);
@@ -277,12 +531,12 @@ function AdminConsole() {
   }
   return <main className="portal-page admin-page">
     {error && <LoadError message={error} />}
-    <div className="welcome-row admin-title"><div><div className="eyebrow"><span className="secure-label"><Icon>shield</Icon> Authenticated console · Sample data</span> Federation engine</div><h1>Super Admin Control Center</h1></div><button className="button button-light" onClick={logout}><Icon>logout</Icon> Sign out</button></div>
+    <div className="welcome-row admin-title"><div><div className="eyebrow"><span className="secure-label"><Icon>shield</Icon> Authenticated console · Live database</span> Federation engine</div><h1>Super Admin Control Center</h1></div><button className="button button-light" onClick={logout}><Icon>logout</Icon> Sign out</button></div>
     {logoutError && <p className="form-error" role="alert">{logoutError}</p>}
-    <section className="metric-grid"><Metric title="Registered traders" value={`${data?.registeredTraders ?? "—"}`} note={`${data?.verifiedTraders ?? "—"} verified`} icon="groups" /><Metric title="Pending verifications" value={`${data?.pendingVerifications ?? "—"}`} note="Requires staff review" icon="hourglass_top" /><Metric title="Flagged accounts" value={`${data?.flaggedAccounts ?? "—"}`} note="Requires audit" icon="warning" /><Metric title="Background sync worker" value="Healthy" note={`${data?.workerUptime ?? "—"}% uptime · demo status`} icon="bolt" green /></section>
-    <section className="season-banner" id="awards"><div><span className="season-chip">Governance · Demo</span><h2>Annual Awards 2026 season</h2><p>View sample season criteria and moderation status. Administrative actions are intentionally disabled in this prototype.</p></div><div className="season-kpis"><span>Min closed trades <b>30</b></span><span>Max drawdown <b>15%</b></span><span>Account age <b>60 days</b></span><span>Finalist cutoff <b>Nov 15</b></span></div></section>
-    <section className="panel moderation-panel"><div className="panel-heading"><div><h2>Accounts &amp; trader moderation</h2><p>Review sample audit records and verification status.</p></div><div className="filter-tabs">{["All", "Pending", "Verified", "Flagged"].map((item) => <button className={filter === item ? "active" : ""} onClick={() => setFilter(item)} key={item}>{item}</button>)}</div></div><div className="table-scroll"><table className="admin-table"><thead><tr><th>Trader</th><th>Platform &amp; server</th><th>Class</th><th className="right">ROI</th><th className="right">Max DD</th><th>Risk analysis</th><th>Status</th></tr></thead><tbody>{accounts.map((account) => <tr key={account.id}><td><b>{account.name}</b><small>{account.city} · {account.email}</small></td><td><b>{account.broker}</b><small>{account.id}</small></td><td>{account.type}</td><td className="right positive">+{account.roi}%</td><td className="right">{account.drawdown}%</td><td>{account.audit}</td><td><span className={`status-tag ${account.status.toLowerCase()}`}>{account.status}</span></td></tr>)}</tbody></table></div></section>
-    <p className="demo-caption">Admin access is verified through Supabase. Trader and moderation data remains illustrative; production actions are not enabled.</p>
+    <section className="metric-grid"><Metric title="Registered traders" value={`${data?.registeredTraders ?? "—"}`} note={`${data?.verifiedTraders ?? "—"} with Verified Real accounts`} icon="groups" /><Metric title="Pending connections" value={`${data?.pendingVerifications ?? "—"}`} note="No account type assumed" icon="hourglass_top" /><Metric title="Connection failures" value={`${data?.flaggedAccounts ?? "—"}`} note="Provider-reported failures" icon="warning" /><Metric title="Scheduled synchronization" value={data ? data.synchronizationEnabled ? "Configured" : "Unavailable" : "—"} note="15-minute in-process schedule" icon="bolt" green={data?.synchronizationEnabled} /></section>
+    <section className="season-banner" id="awards"><div><span className="season-chip">Awards eligibility</span><h2>Annual Global Trader Awards</h2><p>Only Verified Real accounts are eligible. Demo and unverified accounts are excluded; award scoring is not available until ranking criteria are configured.</p></div><div className="season-kpis"><span>Verified Real required <b>Yes</b></span><span>Demo eligibility <b>No</b></span></div></section>
+    <section className="panel moderation-panel"><div className="panel-heading"><div><h2>Accounts &amp; trader moderation</h2><p>Provider-derived account status and synchronized metrics.</p></div><div className="filter-tabs">{["All", "Not Connected", "Connecting", "Connected", "Verified Real", "Demo Account", "Pending Verification", "Connection Failed", "Integration Not Configured", "Disconnected"].map((item) => <button className={filter === item ? "active" : ""} onClick={() => setFilter(item)} key={item}>{item}</button>)}</div></div><div className="table-scroll"><table className="admin-table"><thead><tr><th>Trader</th><th>Platform &amp; server</th><th>Class</th><th className="right">ROI</th><th className="right">Max DD</th><th>Synchronization</th><th>Status</th></tr></thead><tbody>{accounts.map((account) => <tr key={account.id}><td><b>{account.name}</b><small>{account.city} · {account.email}</small></td><td><b>{account.broker}</b><small>{account.id}</small></td><td>{account.type}</td><td className="right">{account.roi == null ? "—" : `${account.roi.toFixed(2)}%`}</td><td className="right">{account.drawdown == null ? "—" : `${account.drawdown.toFixed(2)}%`}</td><td>{account.audit}</td><td><span className={`status-tag ${account.status.toLowerCase().replace(/ /g, "-")}`}>{account.status}</span></td></tr>)}</tbody></table>{!accounts.length && <p className="notice">No accounts match this status.</p>}</div></section>
+    <p className="demo-caption">All listed statuses and metrics are read from the database. No verification or performance data is manually generated.</p>
   </main>;
 }
 

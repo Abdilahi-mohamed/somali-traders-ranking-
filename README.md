@@ -2,8 +2,8 @@
 
 The project is split into independent application folders:
 
-- `frontend/` — React, TypeScript, and Vite public leaderboard, trader portal, and admin console.
-- `backend/` — Express and TypeScript demo API with sample trader, account, and overview data.
+- `frontend/` — React, TypeScript, and Vite leaderboard, trader portal, and admin console.
+- `backend/` — Express, TypeScript, and Supabase API with MetaApi read-only account synchronization.
 
 ## Run locally
 
@@ -12,7 +12,7 @@ Open two terminals from the project directory.
 ```powershell
 cd backend
 Copy-Item .env.example .env
-# Fill SUPABASE_URL, SUPABASE_ANON_KEY, and SUPABASE_SERVICE_ROLE_KEY in .env
+# Set Supabase values; optionally set MetaApi values below.
 npm install
 npm run dev
 ```
@@ -23,8 +23,29 @@ npm install
 npm run dev
 ```
 
-The frontend is available at `http://localhost:5173`. Vite proxies `/api` requests to the backend at `http://localhost:4000`.
-The backend requires Node.js 22 or newer. Create a Supabase project, set the three Supabase values in `backend/.env`, then run both SQL migrations in `backend/supabase/migrations/` in filename order. Keep `.env` local; the service role key must stay on the backend and must never be exposed to Vite or committed.
+The frontend is available at `http://localhost:5173`. Vite proxies `/api` requests to the backend at `http://localhost:4000`. The backend requires Node.js 22 or newer.
+
+Create a Supabase project, set `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` in `backend/.env`, then run every SQL migration in `backend/supabase/migrations/` in filename order. Keep `.env` local; service-role and MetaApi tokens must remain backend-only and must never be exposed to Vite or committed.
+
+### Configure MetaApi
+
+The application uses MetaApi's supported Provisioning and MetaApi REST APIs from the backend. The trader submits only an MT4/MT5 investor password; the service token is never requested from traders or sent to the frontend.
+
+Set these backend environment variables to enable account connections:
+
+```dotenv
+METAAPI_TOKEN=your-server-side-metaapi-token
+METAAPI_BASE_URL=https://mt-provisioning-api-v1.agiliumtrade.agiliumtrade.ai
+METAAPI_REGION=new-york
+```
+
+Create a MetaApi account and obtain an API token with permission to provision and manage the application-owned accounts. MetaApi is a paid service. Account creation depends on broker/server compatibility, valid investor-password support, MetaApi resource limits, and sufficient subscription/resource slots. Some brokers require a provisioning profile configured in MetaApi. Confirm supported server names and account behavior with MetaApi before launch.
+
+Investor passwords are not stored in this application's database; they are sent server-to-server to MetaApi, which must retain the account credential to keep its connection running. Review MetaApi's current credential storage, access controls, retention, and deletion policies for your subscription before enabling production connections. Removing an account through the trader dashboard requests provider-side account removal; if MetaApi is not configured, remote removal cannot be confirmed and the application reports an error instead of claiming disconnection.
+
+The connection is accepted as read-only only when MetaApi's account information confirms `investorMode`. The account type is taken from the platform's `tradeMode` information, and Verified Real/Demo ranking eligibility additionally requires the provider account name to match the trader's registered full name. Missing or unsupported mode or owner information remains Pending Verification; it is never inferred from balance or user-supplied data. Only provider-confirmed REAL accounts enter the official leaderboard; DEMO accounts use the separate demo leaderboard, and CONTEST/unverified accounts are excluded. Open positions are synchronized and exposed only to the authenticated account owner.
+
+Account history and performance snapshots are synchronized by a 15-minute in-process timer. Run only one backend instance with this scheduler until it is moved to a distributed job queue. Maximum drawdown is calculated from captured account-equity snapshots and therefore reflects observed synchronization samples, not every intraperiod equity movement. ROI is measured from the first successful connection snapshot. No live MetaApi account has been used to validate deployment in this repository; configure a test MetaApi account and verify broker compatibility before production.
 
 ### Provision a Super Admin
 
@@ -38,21 +59,19 @@ The backend requires Node.js 22 or newer. Create a Supabase project, set the thr
    where lower(email) = lower('YOUR_SUPABASE_AUTH_EMAIL');
    ```
 
-3. Open `/admin/login` and sign in with that username and the password set in Supabase. Successful sign-in redirects to `/admin`; the server also verifies administrator membership for every admin API request. No default credentials are created.
+3. Open `/admin/login` and sign in with that username and the password set in Supabase. The server verifies administrator membership for every protected admin API request. No default credentials are created.
 
 ## Routes
 
-- `/` — Public performance leaderboard, shown first
-- `/register` — Multi-step registration and account setup
-- `/dashboard` — Trader overview and connected account sample
-- `/admin/login` — Super Admin username/password sign-in
-- `/admin` — Administrator-only moderation overview
+- `/` — Provider-backed Verified Real leaderboard and separate Demo leaderboard.
+- `/register` — Multi-step trader registration; MetaApi connection is optional.
+- `/dashboard` — Authenticated trader account settings, refresh, credential replacement, and disconnection.
+- `/admin/login` — Super Admin username/password sign-in.
+- `/admin` — Administrator-only database overview.
 
-The API supports registration and admin authentication: `GET /api/health`, `GET /api/leaderboard`, `GET /api/trader/overview`, `POST /api/register`, and the protected `/api/admin/*` routes. Supabase Auth manages website passwords; admin access uses a short-lived HttpOnly cookie and a private `admin_users` allowlist. Trader registration stores non-secret MT4/MT5 account metadata, including currency, in RLS-protected Supabase tables. Account type and connection status are not user-selected; new accounts remain pending verification. Duplicate MT4/MT5 account registrations are rejected.
+Trader account and history endpoints require a valid Supabase Auth bearer token and scope every account lookup to the authenticated trader. Registration remains available without MetaApi configuration or an investor password. Duplicate MT4/MT5 account registrations are rejected. The application does not implement trading, deposits, or withdrawals. Missing metrics remain unavailable rather than being fabricated.
 
-The Investor Password field is intentionally disabled: no licensed MT4/MT5 read-only provider, protected credential store/key management, verification service, or synchronization worker is configured. The backend rejects unknown registration fields, so it will not accept an investor password. Do not send an investor or master password until a supported provider is selected, security-reviewed, and configured. No account data is fabricated; the public ranking and trader dashboard show no connected or Verified Real accounts, and ranking/award eligibility requires provider-confirmed REAL account mode. Demo and contest accounts must remain excluded from the official Real Traders Ranking.
-
-Apply the migrations in filename order, including `backend/supabase/migrations/202611240001_metatrader_registration.sql`, to add account currency, verification state, and duplicate account protection. A provider integration, encrypted credential lifecycle, ownership/account-type verification, scheduled snapshots, and authenticated refresh/disconnect endpoints remain required before account connection can be enabled. Configure Supabase Auth email confirmation before launch. The admin overview is still illustrative and is not an authoritative source of account verification.
+Configure Supabase Auth email confirmation before launch. Account status, historical snapshots, and eligibility use the migrations under `backend/supabase/migrations/`.
 
 ## Build
 

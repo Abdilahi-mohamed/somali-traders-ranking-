@@ -6,9 +6,9 @@ export type Trader = {
   account: string;
   platform: string;
   roi: number;
-  drawdown: number;
-  profitFactor: number;
-  winRate: number;
+  drawdown: number | null;
+  winRate: number | null;
   equity: number | null;
-  score: number;
+  pnl: number | null;
+  currency: string | null;
 };
