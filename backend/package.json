@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
+    "test": "node --import tsx --test test/accountVerification.test.ts",
     "start": "node dist/server.js"
   },
   "dependencies": {

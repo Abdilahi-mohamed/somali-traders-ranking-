@@ -1,6 +1,7 @@
 import { z } from "zod";
+import { evaluateAccountVerification, type ProviderAccountType, type VerificationStatus } from "./accountVerification.js";
 import { isMetaApiConfigured } from "./config.js";
-import { MetaApiRequestError, deployMetaApiAccount, provisionMetaApiAccount, removeMetaApiAccount, retrieveMetaApiAccountInformation, retrieveMetaApiDeals, retrieveMetaApiPositions, updateMetaApiCredentials, waitForMetaApiAccount, type MetaApiDeal, type MetaApiPosition } from "./metaApi.js";
+import { MetaApiRequestError, assertMetaApiAccountConnected, deployMetaApiAccount, provisionMetaApiAccount, removeMetaApiAccount, retrieveMetaApiAccountInformation, retrieveMetaApiDeals, retrieveMetaApiPositions, updateMetaApiCredentials, waitForMetaApiAccount, type MetaApiDeal, type MetaApiPosition } from "./metaApi.js";
 import { getSupabaseClients } from "./supabase.js";
 
 const connectionInputSchema = z.object({
@@ -8,7 +9,7 @@ const connectionInputSchema = z.object({
 }).strict();
 
 export type TradingAccount = Awaited<ReturnType<typeof getOwnedTradingAccount>>;
-const connectionStatuses = ["not_connected", "connecting", "connected", "verified_real", "demo_account", "pending_verification", "connection_failed", "integration_not_configured", "disconnected"] as const;
+const connectionStatuses = ["not_connected", "connecting", "connected", "verified_real", "demo_account", "contest_account", "pending_verification", "connection_failed", "integration_not_configured", "disconnected"] as const;
 type ConnectionStatus = typeof connectionStatuses[number];
 
 const backgroundConnections = new Set<string>();
@@ -22,6 +23,7 @@ function legacyVerificationStatus(status: ConnectionStatus) {
     case "connected":
     case "verified_real":
     case "demo_account":
+    case "contest_account":
     case "pending_verification":
     case "connection_failed":
     case "disconnected":
@@ -51,7 +53,7 @@ export async function getOwnedTradingAccount(traderId: string, accountId: string
 
 async function updateOwnedAccount(traderId: string, accountId: string, values: {
   connection_status?: ConnectionStatus;
-  verification_status?: "connected" | "verified_real" | "demo_account" | "pending_verification" | "connection_failed" | "disconnected";
+  verification_status?: "connected" | "verified_real" | "demo_account" | "contest_account" | "pending_verification" | "connection_failed" | "disconnected";
   metaapi_account_id?: string | null;
   ownership_verified?: boolean | null;
   verified_account_type?: string | null;
@@ -92,6 +94,54 @@ async function updateOwnedAccount(traderId: string, accountId: string, values: {
   if (error) throw error;
 }
 
+async function recordVerificationDecision(
+  traderId: string,
+  accountId: string,
+  accountType: ProviderAccountType,
+  status: VerificationStatus,
+  reason: string
+) {
+  const { database } = getSupabaseClients();
+  const { error } = await database.from("trading_account_verification_audit").insert({
+    trader_id: traderId,
+    account_id: accountId,
+    provider_account_type: accountType === "UNKNOWN" ? null : accountType,
+    decision: status,
+    reason
+  });
+  if (error) throw error;
+}
+
+async function clearRankingData(traderId: string, accountId: string, values: {
+  connection_status: ConnectionStatus;
+  verified_account_type: string | null;
+  ownership_verified: boolean | null;
+  last_sync_error: string | null;
+}) {
+  await updateOwnedAccount(traderId, accountId, {
+    ...values,
+    balance: null,
+    equity: null,
+    free_margin: null,
+    used_margin: null,
+    leverage: null,
+    total_pnl: null,
+    daily_pnl: null,
+    weekly_pnl: null,
+    monthly_pnl: null,
+    yearly_pnl: null,
+    total_trades: null,
+    winning_trades: null,
+    losing_trades: null,
+    win_rate: null,
+    roi: null,
+    maximum_drawdown: null
+  });
+  const { database } = getSupabaseClients();
+  const { error } = await database.from("trading_open_positions").delete().eq("account_id", accountId);
+  if (error) throw error;
+}
+
 export function startTradingAccountConnection(traderId: string, accountId: string, investorPassword: string, reserved = false) {
   const key = `${traderId}:${accountId}`;
   if (backgroundConnections.has(key) && !reserved) return;
@@ -101,12 +151,15 @@ export function startTradingAccountConnection(traderId: string, accountId: strin
       const code = error instanceof MetaApiRequestError ? error.providerCode : "connection_failed";
       console.error("MetaApi connection failed.", { accountId, code });
       try {
-        await updateOwnedAccount(traderId, accountId, {
-          connection_status: "connection_failed",
+        await clearRankingData(traderId, accountId, {
+          connection_status: "pending_verification",
+          verified_account_type: null,
+          ownership_verified: null,
           last_sync_error: code
         });
+        await recordVerificationDecision(traderId, accountId, "UNKNOWN", "pending_verification", code);
       } catch {
-        console.error("Could not save MetaApi connection failure status.", { accountId });
+        console.error("Could not save MetaApi connection verification status.", { accountId });
       }
     })
     .finally(() => backgroundConnections.delete(key));
@@ -122,7 +175,12 @@ async function connectAndSynchronize(traderId: string, accountId: string, invest
     return;
   }
 
-  await updateOwnedAccount(traderId, accountId, { connection_status: "connecting", last_sync_error: null });
+  await clearRankingData(traderId, accountId, {
+    connection_status: "connecting",
+    verified_account_type: null,
+    ownership_verified: null,
+    last_sync_error: null
+  });
   let metaApiAccountId = account.metaapi_account_id;
   if (metaApiAccountId) {
     await updateMetaApiCredentials(metaApiAccountId, investorPassword);
@@ -160,24 +218,9 @@ async function connectAndSynchronize(traderId: string, accountId: string, invest
   await synchronizeAccountData(traderId, accountId, metaApiAccountId, account);
 }
 
-function providerAccountType(value: string | null | undefined) {
-  const normalized = value?.toUpperCase();
-  if (normalized === "ACCOUNT_TRADE_MODE_REAL" || normalized === "REAL") return "REAL";
-  if (normalized === "ACCOUNT_TRADE_MODE_DEMO" || normalized === "DEMO") return "DEMO";
-  if (normalized === "ACCOUNT_TRADE_MODE_CONTEST" || normalized === "CONTEST") return "CONTEST";
-  return null;
-}
-
-function connectionStatus(type: string | null, investorMode: boolean, ownershipVerified: boolean): ConnectionStatus {
-  if (!type || !ownershipVerified) return "pending_verification";
-  if (type === "REAL" && investorMode) return "verified_real";
-  if (type === "DEMO") return "demo_account";
-  return "connected";
-}
-
 async function removeMetaApiAccountIfPresent(metaApiAccountId: string) {
   try {
-    await removeMetaApiAccountIfPresent(metaApiAccountId);
+    await removeMetaApiAccount(metaApiAccountId);
   } catch (error) {
     if (!(error instanceof MetaApiRequestError) || error.statusCode !== 404) throw error;
   }
@@ -383,17 +426,33 @@ async function getAllStoredDeals(accountId: string): Promise<MetaApiDeal[]> {
 }
 
 async function synchronizeAccountData(traderId: string, accountId: string, metaApiAccountId: string, existingAccount?: TradingAccount) {
+  await assertMetaApiAccountConnected(metaApiAccountId);
   const info = await retrieveMetaApiAccountInformation(metaApiAccountId);
-  if (info.investorMode !== true) {
-    await updateOwnedAccount(traderId, accountId, {
-      connection_status: info.investorMode === false ? "connection_failed" : "pending_verification",
-      verified_account_type: null,
-      ownership_verified: info.investorMode === false ? false : null,
-      last_sync_error: info.investorMode === false ? "investor_mode_not_confirmed" : "account_mode_unavailable"
+  const ownershipVerified = await verifyAccountOwner(traderId, info.name);
+  const decision = evaluateAccountVerification(info, {
+    accountNumber: existingAccount?.account_number ?? "",
+    server: existingAccount?.server_name ?? "",
+    platform: existingAccount?.platform ?? ""
+  }, ownershipVerified);
+  if (decision.status !== "verified_real") {
+    await recordVerificationDecision(traderId, accountId, decision.accountType, decision.status, decision.reason);
+    await clearRankingData(traderId, accountId, {
+      connection_status: decision.status,
+      verified_account_type: decision.accountType === "UNKNOWN" ? null : decision.accountType,
+      ownership_verified: ownershipVerified,
+      last_sync_error: decision.reason
     });
-    await removeMetaApiAccount(metaApiAccountId);
-    await updateOwnedAccount(traderId, accountId, { metaapi_account_id: null });
-    return { investorMode: info.investorMode, accountType: null };
+    if (
+      decision.status === "demo_account" ||
+      decision.status === "contest_account" ||
+      decision.status === "connection_failed" ||
+      decision.reason === "provider_identity_unconfirmed" ||
+      decision.reason === "account_ownership_unconfirmed"
+    ) {
+      await removeMetaApiAccountIfPresent(metaApiAccountId);
+      await updateOwnedAccount(traderId, accountId, { metaapi_account_id: null });
+    }
+    return { investorMode: info.investorMode, accountType: decision.accountType };
   }
 
   const now = new Date();
@@ -408,15 +467,13 @@ async function synchronizeAccountData(traderId: string, accountId: string, metaA
   const allDeals = await getAllStoredDeals(accountId);
   const metrics = closedTradeMetrics(allDeals);
   const period = periods(now);
-  const mode = providerAccountType(info.tradeMode);
-  const ownershipVerified = await verifyAccountOwner(traderId, info.name);
-  const status = connectionStatus(mode, info.investorMode, ownershipVerified);
+  const mode = decision.accountType;
   const initialBalance = existingAccount?.initial_balance ?? info.balance ?? null;
   const roi = initialBalance && initialBalance > 0 && info.balance != null
     ? ((info.balance - initialBalance) / initialBalance) * 100
     : null;
   const values = {
-    connection_status: status,
+    connection_status: "verified_real" as const,
     verified_account_type: mode,
     ownership_verified: ownershipVerified,
     broker_name: info.broker ?? existingAccount?.broker_name ?? null,
@@ -443,6 +500,7 @@ async function synchronizeAccountData(traderId: string, accountId: string, metaA
     last_successful_sync_at: now.toISOString(),
     last_sync_error: null
   };
+  await recordVerificationDecision(traderId, accountId, mode, "verified_real", decision.reason);
   await updateOwnedAccount(traderId, accountId, values);
   const { database } = getSupabaseClients();
   const { error } = await database.from("trading_account_snapshots").insert({
@@ -513,10 +571,14 @@ export async function refreshOwnedTradingAccount(traderId: string, accountId: st
   if (!isConnectionStatus(account.connection_status)) {
     return { ok: false as const, statusCode: 409, error: "Trading account has an unsupported connection status." };
   }
-  const previousStatus = account.connection_status;
   backgroundConnections.add(key);
   try {
-    await updateOwnedAccount(traderId, accountId, { connection_status: "connecting", last_sync_error: null });
+    await clearRankingData(traderId, accountId, {
+      connection_status: "connecting",
+      verified_account_type: null,
+      ownership_verified: null,
+      last_sync_error: null
+    });
   } catch (error) {
     backgroundConnections.delete(key);
     throw error;
@@ -526,12 +588,15 @@ export async function refreshOwnedTradingAccount(traderId: string, accountId: st
       const code = error instanceof MetaApiRequestError ? error.providerCode : "synchronization_failed";
       console.error("MetaApi synchronization failed.", { accountId, code });
       try {
-        await updateOwnedAccount(traderId, accountId, {
-          connection_status: previousStatus,
+        await clearRankingData(traderId, accountId, {
+          connection_status: "pending_verification",
+          verified_account_type: null,
+          ownership_verified: null,
           last_sync_error: code
         });
+        await recordVerificationDecision(traderId, accountId, "UNKNOWN", "pending_verification", code);
       } catch {
-        console.error("Could not save MetaApi synchronization failure status.", { accountId });
+        console.error("Could not save MetaApi verification failure status.", { accountId });
       }
     })
     .finally(() => backgroundConnections.delete(key));
@@ -586,9 +651,20 @@ function connectionMessage(errorCode: string) {
     case "investor_mode_not_confirmed":
       return "MetaApi could not confirm investor-only access. Use an Investor Password; master-password connections are not accepted.";
     case "account_mode_unavailable":
+    case "account_type_unavailable":
       return "MetaApi did not provide the account mode needed for verification. This account remains Pending Verification.";
+    case "provider_identity_unconfirmed":
+      return "MetaApi could not confirm that the connected login, server, and platform match this registration. The account remains Pending Verification.";
+    case "account_ownership_unconfirmed":
+      return "MetaApi could not confirm that you own this account. The account remains Pending Verification.";
+    case "demo_account_rejected":
+      return "Demo accounts are not accepted and cannot appear in SomTraders rankings.";
+    case "contest_account_rejected":
+      return "Contest accounts are not accepted and cannot appear in SomTraders rankings.";
     case "provider_unavailable":
       return "MetaApi could not be reached. Try again later.";
+    case "account_disconnected":
+      return "MetaApi reports that this account is disconnected. Ranking eligibility remains suspended until it can be re-verified.";
     case "connection_timeout":
       return "The broker connection timed out. Check the broker server and try again.";
     case "history_synchronizing":
@@ -608,6 +684,11 @@ function connectionMessage(errorCode: string) {
 export async function listOwnedTradingOpenPositions(traderId: string, accountId: string) {
   const account = await getOwnedTradingAccount(traderId, accountId);
   if (!account) return null;
+  if (
+    account.connection_status !== "verified_real" ||
+    account.verified_account_type !== "REAL" ||
+    account.ownership_verified !== true
+  ) return [];
   const { database } = getSupabaseClients();
   const { data, error } = await database
     .from("trading_open_positions")
@@ -625,7 +706,7 @@ export async function synchronizeConnectedAccounts() {
     .from("trading_accounts")
     .select("*")
     .not("metaapi_account_id", "is", null)
-    .in("connection_status", ["verified_real", "demo_account", "connected", "pending_verification", "connecting"]);
+    .in("connection_status", ["verified_real", "demo_account", "contest_account", "connected", "pending_verification", "connecting"]);
   if (error) throw error;
   for (const account of data ?? []) {
     if (!account.metaapi_account_id || backgroundConnections.has(`${account.trader_id}:${account.id}`)) continue;
@@ -635,9 +716,13 @@ export async function synchronizeConnectedAccounts() {
       backgroundConnections.delete(key);
       continue;
     }
-    const previousStatus = account.connection_status;
     try {
-      await updateOwnedAccount(account.trader_id, account.id, { connection_status: "connecting", last_sync_error: null });
+      await clearRankingData(account.trader_id, account.id, {
+        connection_status: "connecting",
+        verified_account_type: null,
+        ownership_verified: null,
+        last_sync_error: null
+      });
     } catch (cause) {
       backgroundConnections.delete(key);
       throw cause;
@@ -647,12 +732,15 @@ export async function synchronizeConnectedAccounts() {
         const code = cause instanceof MetaApiRequestError ? cause.providerCode : "synchronization_failed";
         console.error("Scheduled MetaApi synchronization failed.", { accountId: account.id, code });
         try {
-          await updateOwnedAccount(account.trader_id, account.id, {
-            connection_status: previousStatus,
+          await clearRankingData(account.trader_id, account.id, {
+            connection_status: "pending_verification",
+            verified_account_type: null,
+            ownership_verified: null,
             last_sync_error: code
           });
+          await recordVerificationDecision(account.trader_id, account.id, "UNKNOWN", "pending_verification", code);
         } catch {
-          console.error("Could not save scheduled synchronization failure status.", { accountId: account.id });
+          console.error("Could not save scheduled verification failure status.", { accountId: account.id });
         }
       })
       .finally(() => backgroundConnections.delete(key));

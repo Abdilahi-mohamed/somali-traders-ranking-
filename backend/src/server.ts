@@ -102,7 +102,7 @@ function getAccountId(request: express.Request) {
 }
 
 app.get("/api/health", (_request, response) => {
-  response.json({ status: "ok", mode: "demo" });
+  response.json({ status: "ok", mode: "verified_real_accounts_only" });
 });
 
 app.get("/api/metaapi/status", (_request, response) => {
@@ -142,11 +142,7 @@ app.post("/api/register", registrationLimiter, (request, response, next) => {
 });
 
 app.get("/api/leaderboard", (_request, response, next) => {
-  void listLeaderboard("REAL").then((traders) => response.json({ traders, total: traders.length })).catch(next);
-});
-
-app.get("/api/demo-leaderboard", (_request, response, next) => {
-  void listLeaderboard("DEMO").then((traders) => response.json({ traders, total: traders.length })).catch(next);
+  void listLeaderboard().then((traders) => response.json({ traders, total: traders.length })).catch(next);
 });
 
 app.post("/api/admin/login", adminLoginLimiter, (request, response, next) => {

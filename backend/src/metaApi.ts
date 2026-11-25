@@ -177,6 +177,18 @@ export async function waitForMetaApiAccount(metaApiAccountId: string) {
   throw new MetaApiRequestError(504, "connection_timeout");
 }
 
+export async function assertMetaApiAccountConnected(metaApiAccountId: string) {
+  const raw = await requestJson(provisioningUrl(`/users/current/accounts/${encodeURIComponent(metaApiAccountId)}`));
+  const account = provisionedAccountSchema.safeParse(raw);
+  if (!account.success) throw new MetaApiRequestError(502, "invalid_provider_response");
+  if (
+    account.data.state?.toUpperCase() !== "DEPLOYED" ||
+    account.data.connectionStatus?.toUpperCase() !== "CONNECTED"
+  ) {
+    throw new MetaApiRequestError(503, "account_disconnected");
+  }
+}
+
 export async function retrieveMetaApiAccountInformation(metaApiAccountId: string) {
   const response = await requestJson(clientUrl(
     `/users/current/accounts/${encodeURIComponent(metaApiAccountId)}/accountInformation`

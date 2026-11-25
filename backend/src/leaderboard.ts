@@ -1,15 +1,16 @@
 import { getSupabaseClients } from "./supabase.js";
 
-export async function listLeaderboard(accountMode: "REAL" | "DEMO") {
+export async function listLeaderboard() {
   const { database } = getSupabaseClients();
-  const connectionStatus = accountMode === "REAL" ? "verified_real" : "demo_account";
-  const freshnessLimit = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const freshnessLimit = new Date(Date.now() - 30 * 60 * 1000).toISOString();
   const { data: accounts, error: accountError } = await database
     .from("trading_accounts")
     .select("id, trader_id, platform, broker_name, account_currency, equity, show_balance, total_pnl, roi, win_rate, maximum_drawdown")
-    .eq("connection_status", connectionStatus)
-    .eq("verified_account_type", accountMode)
+    .eq("account_type", "forex")
+    .eq("connection_status", "verified_real")
+    .eq("verified_account_type", "REAL")
     .eq("ownership_verified", true)
+    .not("metaapi_account_id", "is", null)
     .not("roi", "is", null)
     .gte("last_successful_sync_at", freshnessLimit)
     .order("roi", { ascending: false });

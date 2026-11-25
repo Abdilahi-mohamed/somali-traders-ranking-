@@ -35,6 +35,12 @@ type Database = {
         Update: Partial<Database["public"]["Tables"]["trading_account_snapshots"]["Insert"]>;
         Relationships: [];
       };
+      trading_account_verification_audit: {
+        Row: { id: string; trader_id: string; account_id: string; provider_account_type: string | null; decision: string; reason: string; decided_at: string };
+        Insert: { id?: string; trader_id: string; account_id: string; provider_account_type?: string | null; decision: string; reason: string; decided_at?: string };
+        Update: Partial<Database["public"]["Tables"]["trading_account_verification_audit"]["Insert"]>;
+        Relationships: [];
+      };
       admin_users: {
         Row: { user_id: string; username: string; email: string; created_at: string };
         Insert: { user_id: string; username: string; email: string; created_at?: string };

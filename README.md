@@ -43,7 +43,7 @@ Create a MetaApi account and obtain an API token with permission to provision an
 
 Investor passwords are not stored in this application's database; they are sent server-to-server to MetaApi, which must retain the account credential to keep its connection running. Review MetaApi's current credential storage, access controls, retention, and deletion policies for your subscription before enabling production connections. Removing an account through the trader dashboard requests provider-side account removal; if MetaApi is not configured, remote removal cannot be confirmed and the application reports an error instead of claiming disconnection.
 
-The connection is accepted as read-only only when MetaApi's account information confirms `investorMode`. The account type is taken from the platform's `tradeMode` information, and Verified Real/Demo ranking eligibility additionally requires the provider account name to match the trader's registered full name. Missing or unsupported mode or owner information remains Pending Verification; it is never inferred from balance or user-supplied data. Only provider-confirmed REAL accounts enter the official leaderboard; DEMO accounts use the separate demo leaderboard, and CONTEST/unverified accounts are excluded. Open positions are synchronized and exposed only to the authenticated account owner.
+The backend accepts ranking eligibility only after MetaApi account information independently confirms a `REAL` trade mode, investor-only access, the registered login/server/platform, and an account-holder name matching the trader's registered full name. `DEMO` and `CONTEST` accounts are rejected; missing or unsupported provider data remains Pending Verification and is never inferred from a trader selection, balance, or user-supplied account type. Non-Real accounts are never included in a leaderboard or ranking score. Verification decisions are recorded in `trading_account_verification_audit`; status is rechecked every 15 minutes, and leaderboard eligibility expires if a successful verification is older than 30 minutes. Failed rechecks immediately suspend eligibility. Open positions are synchronized and exposed only to the authenticated account owner.
 
 Account history and performance snapshots are synchronized by a 15-minute in-process timer. Run only one backend instance with this scheduler until it is moved to a distributed job queue. Maximum drawdown is calculated from captured account-equity snapshots and therefore reflects observed synchronization samples, not every intraperiod equity movement. ROI is measured from the first successful connection snapshot. No live MetaApi account has been used to validate deployment in this repository; configure a test MetaApi account and verify broker compatibility before production.
 
@@ -63,7 +63,7 @@ Account history and performance snapshots are synchronized by a 15-minute in-pro
 
 ## Routes
 
-- `/` — Provider-backed Verified Real leaderboard and separate Demo leaderboard.
+- `/` — Provider-backed Verified Real leaderboard (Live/Real accounts only).
 - `/register` — Multi-step trader registration; MetaApi connection is optional.
 - `/dashboard` — Authenticated trader account settings, refresh, credential replacement, and disconnection.
 - `/admin/login` — Super Admin username/password sign-in.

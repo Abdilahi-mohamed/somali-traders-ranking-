@@ -1,7 +1,7 @@
 import { isMetaApiConfigured } from "./config.js";
 import { getSupabaseClients } from "./supabase.js";
 
-const pendingStatuses = ["not_connected", "connecting", "pending_verification", "integration_not_configured"];
+const pendingStatuses = ["not_connected", "connecting", "connected", "pending_verification", "integration_not_configured"];
 
 function accountStatus(connectionStatus: string) {
   switch (connectionStatus) {
@@ -9,7 +9,8 @@ function accountStatus(connectionStatus: string) {
     case "connecting": return "Connecting";
     case "connected": return "Connected";
     case "verified_real": return "Verified Real";
-    case "demo_account": return "Demo Account";
+    case "demo_account": return "Demo Account — Rejected";
+    case "contest_account": return "Contest Account — Rejected";
     case "pending_verification": return "Pending Verification";
     case "connection_failed": return "Connection Failed";
     case "integration_not_configured": return "Integration Not Configured";
@@ -26,7 +27,7 @@ export async function getAdminOverview() {
   ] = await Promise.all([
     database.from("trader_profiles").select("user_id", { count: "exact", head: true }),
     database.from("trading_accounts")
-      .select("id, trader_id, platform, broker_name, server_name, account_number, account_type, verified_account_type, ownership_verified, connection_status, roi, maximum_drawdown, last_sync_error")
+      .select("id, trader_id, platform, broker_name, server_name, account_number, account_type, verified_account_type, ownership_verified, connection_status, metaapi_account_id, roi, maximum_drawdown, last_successful_sync_at, last_sync_error")
   ]);
   if (traderCountError) throw traderCountError;
   if (accountError) throw accountError;
@@ -38,7 +39,16 @@ export async function getAdminOverview() {
     : { data: [], error: null };
   if (profileError) throw profileError;
   const profilesById = new Map((profiles ?? []).map((profile) => [profile.user_id, profile]));
-  const verifiedTraders = new Set(rows.filter((account) => account.connection_status === "verified_real").map((account) => account.trader_id)).size;
+  const freshnessLimit = Date.now() - 30 * 60 * 1000;
+  const verifiedTraders = new Set(rows.filter((account) =>
+    account.account_type === "forex" &&
+    account.connection_status === "verified_real" &&
+    account.verified_account_type === "REAL" &&
+    account.ownership_verified === true &&
+    Boolean(account.metaapi_account_id) &&
+    account.last_successful_sync_at != null &&
+    new Date(account.last_successful_sync_at).getTime() >= freshnessLimit
+  ).map((account) => account.trader_id)).size;
   const pendingVerifications = rows.filter((account) => pendingStatuses.includes(account.connection_status)).length;
   const flaggedAccounts = rows.filter((account) => account.connection_status === "connection_failed").length;
 
