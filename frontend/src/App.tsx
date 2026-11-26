@@ -76,30 +76,29 @@ function LoadError({ message }: { message: string }) {
 }
 
 function Leaderboard() {
-  const [accountMode, setAccountMode] = useState<"REAL" | "DEMO">("REAL");
-  const { data, error } = useApi<{ traders: Trader[]; total: number }>(accountMode === "REAL" ? "/api/leaderboard" : "/api/demo-leaderboard");
+  const { data, error } = useApi<{ traders: Trader[]; total: number }>("/api/leaderboard");
   const [query, setQuery] = useState("");
   const [region, setRegion] = useState("all");
   const rows = (data?.traders ?? []).filter((trader) => `${trader.name} ${trader.city} ${trader.account} ${trader.platform}`.toLowerCase().includes(query.toLowerCase()))
     .filter((trader) => region === "all" || trader.city.toLowerCase() === region.toLowerCase());
   return <main className="public-page">
     <section className="ranking-intro">
-      <div><p className="eyebrow">Somalia &amp; global diaspora</p><h1>Somali Trader Rankings</h1><p>{accountMode === "REAL" ? "Verified Real accounts only, ranked by provider-synchronized ROI." : "Confirmed Demo accounts, displayed separately from official rankings."}</p></div>
+      <div><p className="eyebrow">Somalia &amp; global diaspora</p><h1>Somali Trader Rankings</h1><p>Only independently verified Live/Real accounts are ranked by provider-synchronized ROI.</p></div>
       <Link className="button button-primary" to="/register"><Icon>person_add</Icon> Register as a trader</Link>
     </section>
     {error && <LoadError message={error} />}
     <section className="filter-panel">
       <div className="filter-main"><label className="searchbox"><Icon>search</Icon><input aria-label="Search traders" placeholder="Search trader, broker, or city..." value={query} onChange={(event) => setQuery(event.target.value)} /></label><select aria-label="Filter by region" value={region} onChange={(event) => setRegion(event.target.value)}><option value="all">All regions</option><option value="boorama">Boorama</option><option value="hargeysa">Hargeysa</option><option value="muqdisho">Muqdisho</option><option value="garoowe">Garoowe</option><option value="qurbaha / diaspora">Qurbaha / Diaspora</option></select></div>
-      <div className="tag-row"><span className="eyebrow">Account type</span><button className={`chip ${accountMode === "REAL" ? "active-chip" : ""}`} onClick={() => setAccountMode("REAL")}>Verified Real · {accountMode === "REAL" ? data?.total ?? "—" : "—"}</button><button className={`chip ${accountMode === "DEMO" ? "active-chip" : ""}`} onClick={() => setAccountMode("DEMO")}>Demo · {accountMode === "DEMO" ? data?.total ?? "—" : "—"}</button></div>
+      <div className="tag-row"><span className="eyebrow">Eligibility</span><span className="chip active-chip">Verified Live/Real · {data?.total ?? "—"}</span></div>
     </section>
     <section className="leader-layout single-leader">
       <div className="table-card">
-        <div className="table-heading"><div><h2>{accountMode === "REAL" ? "Verified Real Trader Ranking" : "Demo Accounts"}</h2><span className="status-tag">{data?.total ?? "—"} accounts</span></div><span className="sync-status">MetaApi data only</span></div>
+        <div className="table-heading"><div><h2>Verified Real Trader Ranking</h2><span className="status-tag">{data?.total ?? "—"} accounts</span></div><span className="sync-status">MetaApi data only</span></div>
         <div className="table-scroll"><table className="leader-table"><thead><tr><th>Rank</th><th>Trader &amp; origin</th><th>Broker / platform</th><th className="right">ROI</th><th className="right">Total PNL</th><th className="right">Observed Max DD</th><th className="right">Win rate</th><th className="right">Equity</th></tr></thead><tbody>
           {rows.map((trader, index) => <tr key={trader.id}><td><span className="rank">{index + 1}</span></td><td><div className="person-cell"><span className="avatar">{trader.initials}</span><span><b>{trader.name}</b><small>{trader.city}</small></span></div></td><td><b>{trader.account}</b><small>{trader.platform} · Read-only</small></td><td className={`right ${trader.roi >= 0 ? "positive" : "negative"}`}>{trader.roi.toFixed(2)}%</td><td className="right">{trader.pnl == null ? "—" : `${trader.pnl.toLocaleString()} ${trader.currency ?? ""}`}</td><td className="right">{trader.drawdown == null ? "—" : `${trader.drawdown.toFixed(2)}%`}</td><td className="right">{trader.winRate == null ? "—" : `${trader.winRate.toFixed(2)}%`}</td><td className="right">{trader.equity == null ? "—" : `${trader.equity.toLocaleString()} ${trader.currency ?? ""}`}</td></tr>)}
-          {!rows.length && <tr><td className="empty-row" colSpan={8}>{accountMode === "REAL" ? "No Verified Real accounts are available yet. Only accounts confirmed by MetaApi qualify." : "No confirmed Demo accounts are available."}</td></tr>}
+          {!rows.length && <tr><td className="empty-row" colSpan={8}>No Verified Real accounts are available yet. Only accounts confirmed by MetaApi qualify.</td></tr>}
         </tbody></table></div>
-        <div className="table-footer"><span>Showing {rows.length} of {data?.total ?? "—"} {accountMode === "REAL" ? "Verified Real accounts" : "Demo accounts"}</span></div>
+        <div className="table-footer"><span>Showing {rows.length} of {data?.total ?? "—"} Verified Real accounts</span></div>
       </div>
     </section>
     <section className="trust-strip" id="method"><span className="trust-icon"><Icon>shield</Icon></span><div><h2>Read-only verification</h2><p>Only accounts confirmed by MetaApi as REAL are listed in the official ranking. Account screenshots and manual performance claims do not qualify.</p></div><div className="broker-list"><b>Provider integrations</b><b>MetaApi</b></div></section>
@@ -234,7 +233,7 @@ function Register() {
             <div className="form-section-title"><span>01</span><div><h2>Your public profile</h2><p>These details identify your trader profile.</p></div></div>
             <div className="form-grid"><label>Full name<input name="fullName" autoComplete="name" defaultValue={profile?.fullName ?? ""} required placeholder="Your full name" /></label><label>Trading alias<input name="alias" defaultValue={profile?.alias ?? ""} required placeholder="Name shown on leaderboard" /></label><label>Email address<input name="email" type="email" autoComplete="email" defaultValue={profile?.email ?? ""} required placeholder="you@example.com" /></label><label>Phone / WhatsApp<input name="phone" type="tel" autoComplete="tel" defaultValue={profile?.phone ?? ""} required placeholder="+252 63 000 0000" /></label><label>City / region<select name="region" defaultValue={profile?.region ?? ""} required><option value="" disabled>Select your region</option><option>Boorama</option><option>Hargeysa</option><option>Muqdisho</option><option>Garoowe</option><option>Qurbaha / Diaspora</option></select></label><label>Telegram or social profile <span className="optional">Optional</span><input name="social" defaultValue={profile?.social ?? ""} placeholder="@username or profile URL" /></label><label>Create website password<input name="password" type="password" autoComplete="new-password" minLength={10} required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 10 characters" /></label><label>Confirm password<input name="confirmPassword" type="password" autoComplete="new-password" minLength={10} required value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Enter it again" /></label></div>
             {formError && <p className="form-error" role="alert">{formError}</p>}
-            <label className="consent-row"><input type="checkbox" required /> I consent to saving my profile and selected account details in Supabase. Supabase Auth manages my website password.</label>
+            <label className="consent-row"><input type="checkbox" required /> I consent to saving my profile and selected account details in MongoDB.</label>
             <div className="form-actions"><span>Next: account details</span><button className="button button-primary" type="submit">Continue <Icon>arrow_forward</Icon></button></div>
           </form>}
           {step === 2 && <form className="registration-form" onSubmit={continueAccount}>
@@ -247,7 +246,7 @@ function Register() {
           </form>}
           {step === 3 && <div className="registration-form">
             <div className="form-section-title"><span>03</span><div><h2>Review &amp; finish</h2><p>Review the profile and account details before saving.</p></div></div>
-            <div className="review-list"><p><Icon>check_circle</Icon> Your profile and account metadata will be saved in Supabase.</p><p><Icon>lock</Icon> Supabase Auth manages your website password; this app does not store it in the profile database.</p><p><Icon>lock</Icon> The Investor Password is sent only to the backend when MetaApi is configured and you chose Connect Trading Account. It is not stored in this platform's database.</p></div>
+            <div className="review-list"><p><Icon>check_circle</Icon> Your profile and account metadata will be saved in MongoDB.</p><p><Icon>lock</Icon> Your website password is stored only as a salted scrypt hash.</p><p><Icon>lock</Icon> The Investor Password is sent only to the backend when MetaApi is configured and you chose Connect Trading Account. It is not stored in this platform's database.</p></div>
             <div className="secure-connect"><Icon>{connectOnRegistration && investorPassword && metaApiStatus?.configured ? "sync" : "info"}</Icon><div><b>{connectOnRegistration && investorPassword && metaApiStatus?.configured ? "MetaApi will connect after registration" : "You can connect later"}</b><p>{connectOnRegistration && investorPassword && metaApiStatus?.configured ? "Registration completes independently; connection status will be reported separately." : metaApiStatus?.message ?? "You can finish registration without connecting a trading account."}</p></div></div>
             <div className="secure-connect"><Icon>badge</Icon><div><b>Awards identity review</b><p>Government ID and payout certificates are not uploaded here. A verified, access-controlled review flow must be in place before collecting identity documents.</p></div></div>
             {registrationError && <p className="form-error" role="alert">{registrationError}</p>}
@@ -255,7 +254,7 @@ function Register() {
           </div>}
         </>}
       </section>
-      <aside className="registration-aside"><div className="aside-icon"><Icon>shield_lock</Icon></div><h2>Your account security comes first</h2><p>We only show audited rankings. Never share your main trading password or enable API trading/withdrawal permissions.</p><ul><li><Icon>check</Icon> Website passwords handled by Supabase Auth</li><li><Icon>check</Icon> Optional balance privacy</li><li><Icon>lock</Icon> Broker secrets and ID documents are not collected</li></ul><div className="aside-note">Keep the Supabase service role key on the server only.</div></aside>
+      <aside className="registration-aside"><div className="aside-icon"><Icon>shield_lock</Icon></div><h2>Your account security comes first</h2><p>We only show audited rankings. Never share your main trading password or enable API trading/withdrawal permissions.</p><ul><li><Icon>check</Icon> Website passwords are salted and hashed</li><li><Icon>check</Icon> Optional balance privacy</li><li><Icon>lock</Icon> Broker secrets and ID documents are not collected</li></ul><div className="aside-note">Keep MongoDB and token secrets on the server only.</div></aside>
     </div>
   </main>;
 }
@@ -388,10 +387,14 @@ function TraderDashboard() {
     setAccessToken("");
   }
 
-  const statusLabel = (status: string) => status.replace(/_/g, " ").replace(/\b\w/g, (letter: string) => letter.toUpperCase());
+  const statusLabel = (status: string) => {
+    if (status === "demo_account") return "Demo Account — Rejected";
+    if (status === "contest_account") return "Contest Account — Rejected";
+    return status.replace(/_/g, " ").replace(/\b\w/g, (letter: string) => letter.toUpperCase());
+  };
   const canDisconnect = (account: Account) => account.has_connection && !["connecting", "disconnected"].includes(account.connection_status);
   const canRefresh = (account: Account) => providerStatus?.configured && account.has_connection &&
-    ["connected", "verified_real", "demo_account", "pending_verification"].includes(account.connection_status);
+    ["connected", "verified_real", "demo_account", "contest_account", "pending_verification"].includes(account.connection_status);
   const formatMoney = (value: number | null, currency: string | null) => value === null ? "—" : `${value.toLocaleString()} ${currency ?? ""}`.trim();
 
   return <main className="portal-page">
@@ -407,7 +410,7 @@ function TraderDashboard() {
       </form>
     </section> : loading && !accounts.length ? <div className="notice">Loading trading accounts…</div> : accounts.length ? accounts.map((account) => {
       const summary: Array<[string, string]> = [
-        ["Account Type", account.verified_account_type ?? (account.connection_status === "demo_account" ? "DEMO" : "Pending Verification")],
+        ["Account Type", account.verified_account_type ?? (account.connection_status === "demo_account" ? "DEMO" : account.connection_status === "contest_account" ? "CONTEST" : "Pending Verification")],
         ["Balance", formatMoney(account.balance, account.account_currency)],
         ["Equity", formatMoney(account.equity, account.account_currency)],
         ["Total PNL", formatMoney(account.total_pnl, account.account_currency)],
@@ -419,7 +422,7 @@ function TraderDashboard() {
       return <section className="panel accounts-panel" id="accounts" key={account.id}>
         <div className="panel-heading">
           <div><h2>{account.broker_name ?? "Trading account"} · {account.platform ?? "MT4/MT5"}</h2><p>Login {account.account_number ?? "—"} · {account.server_name ?? "—"}</p></div>
-          <span className={`status-tag ${account.connection_status === "connection_failed" ? "flagged" : account.connection_status === "pending_verification" ? "pending" : ""}`}>{statusLabel(account.connection_status)}</span>
+          <span className={`status-tag ${["connection_failed", "demo_account", "contest_account"].includes(account.connection_status) ? "flagged" : account.connection_status === "pending_verification" ? "pending" : ""}`}>{statusLabel(account.connection_status)}</span>
         </div>
         <div className="account-summary-grid">{summary.map(([label, value]) => <div key={label}><small>{label}</small><b>{value}</b></div>)}</div>
         <div className="account-settings">

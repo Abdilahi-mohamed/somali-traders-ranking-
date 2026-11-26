@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { getSupabaseClients } from "./supabase.js";
+import { createSessionToken, readSessionToken, verifyPassword } from "./authTokens.js";
+import { getMongoCollections } from "./mongo.js";
 
 export const traderLoginSchema = z.object({
   email: z.string().trim().email().max(254),
@@ -14,41 +15,29 @@ export class InvalidTraderCredentialsError extends Error {
 }
 
 export async function loginTrader(email: string, password: string) {
-  const { auth, database } = getSupabaseClients();
-  const { data, error } = await auth.auth.signInWithPassword({ email: email.toLowerCase(), password });
-  if (error || !data.user || !data.session) throw new InvalidTraderCredentialsError();
+  const profiles = (await getMongoCollections()).trader_profiles;
+  const trader = await profiles.findOne(
+    { email: email.toLowerCase() },
+    { collation: { locale: "en", strength: 2 } }
+  );
+  if (!trader || !await verifyPassword(password, trader.password_hash)) throw new InvalidTraderCredentialsError();
 
-  const { data: trader, error: traderError } = await database
-    .from("trader_profiles")
-    .select("user_id")
-    .eq("user_id", data.user.id)
-    .maybeSingle();
-  if (traderError) throw traderError;
-  if (!trader) throw new InvalidTraderCredentialsError();
-
+  const session = createSessionToken(trader.user_id, "trader");
   return {
-    userId: data.user.id,
-    accessToken: data.session.access_token,
-    refreshToken: data.session.refresh_token,
-    expiresIn: data.session.expires_in
+    userId: trader.user_id,
+    accessToken: session.token,
+    expiresIn: session.expiresIn
   };
 }
 
 export async function getTraderFromAccessToken(accessToken: string) {
-  const { auth, database } = getSupabaseClients();
-  const { data, error } = await auth.auth.getUser(accessToken);
-  if (error) {
-    if (error.status === 401) return null;
-    throw error;
-  }
-  if (!data.user) return null;
+  const claims = readSessionToken(accessToken, "trader");
+  if (!claims) return null;
 
-  const { data: trader, error: traderError } = await database
-    .from("trader_profiles")
-    .select("user_id, full_name, trading_alias")
-    .eq("user_id", data.user.id)
-    .maybeSingle();
-  if (traderError) throw traderError;
+  const trader = await (await getMongoCollections()).trader_profiles.findOne(
+    { user_id: claims.sub },
+    { projection: { user_id: 1, full_name: 1, trading_alias: 1 } }
+  );
   if (!trader) return null;
-  return trader;
+  return { user_id: trader.user_id, full_name: trader.full_name, trading_alias: trader.trading_alias };
 }

@@ -1,28 +1,24 @@
-import { getSupabaseClients } from "./supabase.js";
+import { getMongoCollections } from "./mongo.js";
 
-export async function listLeaderboard(accountMode: "REAL" | "DEMO") {
-  const { database } = getSupabaseClients();
-  const connectionStatus = accountMode === "REAL" ? "verified_real" : "demo_account";
-  const freshnessLimit = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const { data: accounts, error: accountError } = await database
-    .from("trading_accounts")
-    .select("id, trader_id, platform, broker_name, account_currency, equity, show_balance, total_pnl, roi, win_rate, maximum_drawdown")
-    .eq("connection_status", connectionStatus)
-    .eq("verified_account_type", accountMode)
-    .eq("ownership_verified", true)
-    .not("roi", "is", null)
-    .gte("last_successful_sync_at", freshnessLimit)
-    .order("roi", { ascending: false });
-  if (accountError) throw accountError;
-  if (!accounts?.length) return [];
+export async function listLeaderboard() {
+  const collections = await getMongoCollections();
+  const freshnessLimit = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const accounts = await collections.trading_accounts.find({
+    account_type: "forex",
+    connection_status: "verified_real",
+    verified_account_type: "REAL",
+    ownership_verified: true,
+    metaapi_account_id: { $ne: null },
+    roi: { $ne: null },
+    last_successful_sync_at: { $gte: freshnessLimit }
+  }).sort({ roi: -1 }).toArray();
+  if (!accounts.length) return [];
 
   const traderIds = [...new Set(accounts.map((account) => account.trader_id))];
-  const { data: profiles, error: profileError } = await database
-    .from("trader_profiles")
-    .select("user_id, trading_alias, region")
-    .in("user_id", traderIds);
-  if (profileError) throw profileError;
-  const profilesById = new Map((profiles ?? []).map((profile) => [profile.user_id, profile]));
+  const profiles = await collections.trader_profiles.find({ user_id: { $in: traderIds } })
+    .project({ user_id: 1, trading_alias: 1, region: 1 })
+    .toArray();
+  const profilesById = new Map(profiles.map((profile) => [profile.user_id, profile]));
 
   return accounts.flatMap((account) => {
     const profile = profilesById.get(account.trader_id);
@@ -31,7 +27,7 @@ export async function listLeaderboard(accountMode: "REAL" | "DEMO") {
     return [{
       id: account.id,
       name,
-      initials: name.split(/\s+/).slice(0, 2).map((part) => part[0] ?? "").join("").toUpperCase(),
+      initials: name.split(/\s+/).slice(0, 2).map((part: string) => part[0] ?? "").join("").toUpperCase(),
       city: profile.region,
       account: account.broker_name ?? "MetaTrader account",
       platform: account.platform ?? "MetaTrader",
