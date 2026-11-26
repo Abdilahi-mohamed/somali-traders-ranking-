@@ -1,5 +1,5 @@
 import { isMetaApiConfigured } from "./config.js";
-import { getSupabaseClients } from "./supabase.js";
+import { getMongoCollections } from "./mongo.js";
 
 const pendingStatuses = ["not_connected", "connecting", "connected", "pending_verification", "integration_not_configured"];
 
@@ -20,25 +20,18 @@ function accountStatus(connectionStatus: string) {
 }
 
 export async function getAdminOverview() {
-  const { database } = getSupabaseClients();
-  const [
-    { count: registeredTraders, error: traderCountError },
-    { data: accounts, error: accountError }
-  ] = await Promise.all([
-    database.from("trader_profiles").select("user_id", { count: "exact", head: true }),
-    database.from("trading_accounts")
-      .select("id, trader_id, platform, broker_name, server_name, account_number, account_type, verified_account_type, ownership_verified, connection_status, metaapi_account_id, roi, maximum_drawdown, last_successful_sync_at, last_sync_error")
+  const collections = await getMongoCollections();
+  const [registeredTraders, rows] = await Promise.all([
+    collections.trader_profiles.countDocuments(),
+    collections.trading_accounts.find().toArray()
   ]);
-  if (traderCountError) throw traderCountError;
-  if (accountError) throw accountError;
-
-  const rows = accounts ?? [];
   const traderIds = [...new Set(rows.map((account) => account.trader_id))];
-  const { data: profiles, error: profileError } = traderIds.length
-    ? await database.from("trader_profiles").select("user_id, full_name, trading_alias, email, region").in("user_id", traderIds)
-    : { data: [], error: null };
-  if (profileError) throw profileError;
-  const profilesById = new Map((profiles ?? []).map((profile) => [profile.user_id, profile]));
+  const profiles = traderIds.length
+    ? await collections.trader_profiles.find({ user_id: { $in: traderIds } })
+      .project({ user_id: 1, full_name: 1, trading_alias: 1, email: 1, region: 1 })
+      .toArray()
+    : [];
+  const profilesById = new Map(profiles.map((profile) => [profile.user_id, profile]));
   const freshnessLimit = Date.now() - 30 * 60 * 1000;
   const verifiedTraders = new Set(rows.filter((account) =>
     account.account_type === "forex" &&
@@ -53,7 +46,7 @@ export async function getAdminOverview() {
   const flaggedAccounts = rows.filter((account) => account.connection_status === "connection_failed").length;
 
   return {
-    registeredTraders: registeredTraders ?? 0,
+    registeredTraders,
     verifiedTraders,
     pendingVerifications,
     flaggedAccounts,

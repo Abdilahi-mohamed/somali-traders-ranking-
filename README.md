@@ -3,7 +3,7 @@
 The project is split into independent application folders:
 
 - `frontend/` — React, TypeScript, and Vite leaderboard, trader portal, and admin console.
-- `backend/` — Express, TypeScript, and Supabase API with MetaApi read-only account synchronization.
+- `backend/` — Express, TypeScript, MongoDB, and MetaApi read-only account synchronization.
 
 ## Run locally
 
@@ -12,7 +12,7 @@ Open two terminals from the project directory.
 ```powershell
 cd backend
 Copy-Item .env.example .env
-# Set Supabase values; optionally set MetaApi values below.
+# Configure MongoDB and a private session-signing secret; optionally configure MetaApi below.
 npm install
 npm run dev
 ```
@@ -25,7 +25,19 @@ npm run dev
 
 The frontend is available at `http://localhost:5173`. Vite proxies `/api` requests to the backend at `http://localhost:4000`. The backend requires Node.js 22 or newer.
 
-Create a Supabase project, set `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` in `backend/.env`, then run every SQL migration in `backend/supabase/migrations/` in filename order. Keep `.env` local; service-role and MetaApi tokens must remain backend-only and must never be exposed to Vite or committed.
+Set `MONGODB_URI` and `MONGODB_DATABASE` in `backend/.env`. For a local MongoDB server, the example URI works as-is; for MongoDB Atlas, use the cluster connection string and allow the backend host in the Atlas network access list. The backend creates its collections and indexes on startup. Keep the MongoDB URI, `AUTH_TOKEN_SECRET`, and MetaApi token private and backend-only; never expose or commit them.
+
+Generate a unique signing secret for each environment:
+
+```powershell
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+```
+
+Set the output as `AUTH_TOKEN_SECRET`. Trader passwords are stored as salted scrypt hashes, and API sessions are HMAC-signed and expire after seven days. Configure `ADMIN_USERNAME`, `ADMIN_EMAIL`, and `ADMIN_PASSWORD` together on the first startup to provision an administrator; use a strong password of at least 12 characters. These values only create the admin if that username does not already exist. There is no default admin account.
+
+Supabase is no longer used for storage or authentication. New registrations are immediately able to sign in; email confirmation and password-reset emails are not provided by this application.
+
+**Existing Supabase data is not automatically copied.** Keep your old Supabase project until any required data has been exported and migrated. Because Supabase password hashes cannot be reused by this MongoDB authentication system, existing traders must register new credentials; historical profiles, account records, trading history, and admin accounts need a separately planned migration before switching a production deployment.
 
 ### Configure MetaApi
 
@@ -49,17 +61,7 @@ Account history and performance snapshots are synchronized by a 15-minute in-pro
 
 ### Provision a Super Admin
 
-1. In Supabase Dashboard, create the administrator in **Authentication → Users** and set a strong password. Do not use the public trader registration flow for admin accounts.
-2. In the SQL Editor, associate that Auth user with a unique, lowercase username:
-
-   ```sql
-   insert into public.admin_users (user_id, username, email)
-   select id, lower('YOUR_USERNAME'), lower(email)
-   from auth.users
-   where lower(email) = lower('YOUR_SUPABASE_AUTH_EMAIL');
-   ```
-
-3. Open `/admin/login` and sign in with that username and the password set in Supabase. The server verifies administrator membership for every protected admin API request. No default credentials are created.
+Set `ADMIN_USERNAME`, `ADMIN_EMAIL`, and `ADMIN_PASSWORD` in `backend/.env` before the first backend startup. Open `/admin/login` and sign in with those credentials. The server verifies the signed session and MongoDB admin record for every protected admin API request.
 
 ## Routes
 
@@ -69,9 +71,7 @@ Account history and performance snapshots are synchronized by a 15-minute in-pro
 - `/admin/login` — Super Admin username/password sign-in.
 - `/admin` — Administrator-only database overview.
 
-Trader account and history endpoints require a valid Supabase Auth bearer token and scope every account lookup to the authenticated trader. Registration remains available without MetaApi configuration or an investor password. Duplicate MT4/MT5 account registrations are rejected. The application does not implement trading, deposits, or withdrawals. Missing metrics remain unavailable rather than being fabricated.
-
-Configure Supabase Auth email confirmation before launch. Account status, historical snapshots, and eligibility use the migrations under `backend/supabase/migrations/`.
+Trader account and history endpoints require a valid signed bearer token and scope every account lookup to the authenticated trader. Registration remains available without MetaApi configuration or an investor password. Duplicate MT4/MT5 account registrations are rejected. The application does not implement trading, deposits, or withdrawals. Missing metrics remain unavailable rather than being fabricated. Account status, trading history, positions, snapshots, verification audits, trader profiles, and administrators are stored in MongoDB.
 
 ## Build
 

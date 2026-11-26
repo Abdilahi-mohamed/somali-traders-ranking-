@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { getSupabaseClients } from "./supabase.js";
+import { createSessionToken, hashPassword, verifyPassword, readSessionToken } from "./authTokens.js";
+import { getMongoCollections } from "./mongo.js";
 
 export const adminLoginSchema = z.object({
   username: z.string().trim().min(3).max(32).regex(/^[a-zA-Z0-9._-]+$/).transform((value) => value.toLowerCase()),
@@ -13,50 +15,55 @@ export class InvalidAdminCredentialsError extends Error {
   }
 }
 
+export async function provisionInitialAdmin() {
+  const username = process.env.ADMIN_USERNAME?.trim().toLowerCase();
+  const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+  const password = process.env.ADMIN_PASSWORD;
+  const parsedEmail = email ? z.string().email().safeParse(email) : null;
+  if (!username && !email && !password) {
+    if (await (await getMongoCollections()).admin_users.countDocuments() === 0) {
+      console.warn("No administrator exists. Configure ADMIN_USERNAME, ADMIN_EMAIL, and ADMIN_PASSWORD to provision one.");
+    }
+    return;
+  }
+  if (!username || !email || !password || !parsedEmail?.success || !/^[a-z0-9._-]{3,32}$/.test(username) || password.length < 12) {
+    throw new Error("Set a valid ADMIN_USERNAME, ADMIN_EMAIL, and ADMIN_PASSWORD (at least 12 characters) together.");
+  }
+
+  const admins = (await getMongoCollections()).admin_users;
+  await admins.updateOne(
+    { username },
+    {
+      $setOnInsert: {
+        user_id: randomUUID(),
+        username,
+        email,
+        password_hash: await hashPassword(password),
+        created_at: new Date().toISOString()
+      }
+    },
+    { upsert: true }
+  );
+}
+
 export async function loginAdmin(username: string, password: string) {
-  const { auth, database } = getSupabaseClients();
-  const { data: admin, error: adminError } = await database
-    .from("admin_users")
-    .select("user_id, username, email")
-    .eq("username", username)
-    .maybeSingle();
+  const admins = (await getMongoCollections()).admin_users;
+  const admin = await admins.findOne({ username }, { collation: { locale: "en", strength: 2 } });
+  if (!admin || !await verifyPassword(password, admin.password_hash)) throw new InvalidAdminCredentialsError();
 
-  if (adminError) throw adminError;
-  if (!admin) throw new InvalidAdminCredentialsError();
-
-  const { data, error } = await auth.auth.signInWithPassword({ email: admin.email, password });
-  if (error) {
-    if (error.status === 400 || error.status === 401) throw new InvalidAdminCredentialsError();
-    throw error;
-  }
-  if (!data.user || !data.session || data.user.id !== admin.user_id) {
-    throw new InvalidAdminCredentialsError();
-  }
-
+  const session = createSessionToken(admin.user_id, "admin");
   return {
-    accessToken: data.session.access_token,
-    expiresIn: data.session.expires_in,
+    accessToken: session.token,
+    expiresIn: session.expiresIn,
     user: { id: admin.user_id, username: admin.username, email: admin.email }
   };
 }
 
 export async function getAdminFromAccessToken(accessToken: string) {
-  const { auth, database } = getSupabaseClients();
-  const { data, error } = await auth.auth.getUser(accessToken);
-  if (error) {
-    if (error.status === 401) return null;
-    throw error;
-  }
-  if (!data.user) return null;
+  const claims = readSessionToken(accessToken, "admin");
+  if (!claims) return null;
 
-  const { data: admin, error: adminError } = await database
-    .from("admin_users")
-    .select("user_id, username, email")
-    .eq("user_id", data.user.id)
-    .maybeSingle();
-
-  if (adminError) throw adminError;
+  const admin = await (await getMongoCollections()).admin_users.findOne({ user_id: claims.sub });
   if (!admin) return null;
-
   return { id: admin.user_id, username: admin.username, email: admin.email };
 }

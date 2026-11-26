@@ -1,7 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { hashPassword, createSessionToken } from "./authTokens.js";
 import { isMetaApiConfigured } from "./config.js";
+import { getMongoCollections, isDuplicateEmailKeyError, isDuplicateKeyError } from "./mongo.js";
 import { startTradingAccountConnection } from "./tradingAccounts.js";
-import { getSupabaseClients } from "./supabase.js";
 
 const accountSchema = z.discriminatedUnion("type", [
   z.object({
@@ -43,98 +45,128 @@ export class DuplicateEmailError extends Error {
   }
 }
 
-export async function registerTrader(input: RegistrationInput) {
-  const { auth, database } = getSupabaseClients();
-  const { investorPassword, ...accountToSave } = input.account.type === "forex" ? input.account : { ...input.account, investorPassword: undefined };
-  const { data, error } = await auth.auth.signUp({
-    email: input.email.toLowerCase(),
-    password: input.password,
-    options: { data: { trading_alias: input.alias } }
-  });
-
-  if (error) {
-    if (error.code === "user_already_exists" || error.message.toLowerCase().includes("already registered")) {
-      throw new DuplicateEmailError();
-    }
-    throw error;
-  }
-  if (!data.user) {
-    throw new Error("Supabase Auth did not return a user after signup.");
-  }
-  if (data.user.identities?.length === 0) {
-    throw new DuplicateEmailError();
-  }
-
-  const { error: profileError } = await database.rpc("create_trader_registration", {
-    p_user_id: data.user.id,
-    p_full_name: input.fullName,
-    p_alias: input.alias,
-    p_email: input.email.toLowerCase(),
-    p_phone: input.phone,
-    p_region: input.region,
-    p_social: input.social,
-    p_account: accountToSave,
-    p_consent_at: new Date().toISOString()
-  });
-
-  if (profileError) {
-    const { error: cleanupError } = await database.auth.admin.deleteUser(data.user.id);
-    if (cleanupError) {
-      console.error("Could not remove Supabase Auth user after profile creation failed.", cleanupError.message);
-    }
-    if (profileError.code === "23505" && profileError.message.includes("trading_accounts_mt_login_unique")) {
-      throw new DuplicateTradingAccountError();
-    }
-    throw profileError;
-  }
-
-  let tradingAccountId: string | null = null;
-  let connectionStatus: string | null = null;
-  if (accountToSave.type === "forex") {
-    const { data: tradingAccount, error: accountError } = await database
-      .from("trading_accounts")
-      .select("id")
-      .eq("trader_id", data.user.id)
-      .eq("account_number", accountToSave.accountNumber)
-      .maybeSingle();
-    if (accountError) {
-      console.error("Could not retrieve the newly registered trading account.", { traderId: data.user.id });
-      connectionStatus = "connection_failed";
-    } else if (tradingAccount) {
-      tradingAccountId = tradingAccount.id;
-      if (investorPassword && isMetaApiConfigured()) {
-        connectionStatus = "connecting";
-        startTradingAccountConnection(data.user.id, tradingAccount.id, investorPassword);
-      } else if (investorPassword && !isMetaApiConfigured()) {
-        connectionStatus = "integration_not_configured";
-        const { error: statusError } = await database
-          .from("trading_accounts")
-          .update({ connection_status: "integration_not_configured" })
-          .eq("id", tradingAccount.id)
-          .eq("trader_id", data.user.id);
-        if (statusError) {
-          console.error("Could not save MetaApi configuration status.", { traderId: data.user.id });
-        }
-      } else {
-        connectionStatus = isMetaApiConfigured() ? "not_connected" : "integration_not_configured";
-      }
-    }
-  }
-
-  return {
-    id: data.user.id,
-    status: "pending_verification" as const,
-    emailConfirmationRequired: !data.session,
-    accessToken: data.session?.access_token ?? null,
-    refreshToken: data.session?.refresh_token ?? null,
-    tradingAccountId,
-    connectionStatus
-  };
-}
-
 export class DuplicateTradingAccountError extends Error {
   constructor() {
     super("This MT4/MT5 account has already been registered.");
     this.name = "DuplicateTradingAccountError";
   }
+}
+
+function isDuplicateEmailError(error: unknown) {
+  return isDuplicateEmailKeyError(error);
+}
+
+export async function registerTrader(input: RegistrationInput) {
+  const collections = await getMongoCollections();
+  const email = input.email.toLowerCase();
+  const existing = await collections.trader_profiles.findOne({ email }, { collation: { locale: "en", strength: 2 } });
+  if (existing) throw new DuplicateEmailError();
+
+  const userId = randomUUID();
+  const accountId = randomUUID();
+  const now = new Date().toISOString();
+  const { investorPassword, ...accountToSave } = input.account.type === "forex"
+    ? input.account
+    : { ...input.account, investorPassword: undefined };
+  const profile = {
+    user_id: userId,
+    full_name: input.fullName,
+    trading_alias: input.alias,
+    email,
+    phone: input.phone,
+    region: input.region,
+    social_profile: input.social,
+    status: "pending_verification",
+    consent_at: now,
+    created_at: now,
+    password_hash: await hashPassword(input.password)
+  };
+  const commonAccountFields = {
+    id: accountId,
+    trader_id: userId,
+    account_category: null,
+    prop_firm: null,
+    platform: accountToSave.type === "forex" ? accountToSave.platform : null,
+    broker_name: accountToSave.type === "forex" ? accountToSave.brokerName : null,
+    server_name: accountToSave.type === "forex" ? accountToSave.server : null,
+    account_number: accountToSave.type === "forex" ? accountToSave.accountNumber : null,
+    account_currency: accountToSave.type === "forex" ? accountToSave.currency : null,
+    verification_status: "pending_verification",
+    verified_account_type: null,
+    last_synced_at: null,
+    connection_status: "not_connected",
+    metaapi_account_id: null,
+    ownership_verified: null,
+    initial_balance: null,
+    balance: null,
+    equity: null,
+    free_margin: null,
+    used_margin: null,
+    leverage: null,
+    total_pnl: null,
+    daily_pnl: null,
+    weekly_pnl: null,
+    monthly_pnl: null,
+    yearly_pnl: null,
+    total_trades: null,
+    winning_trades: null,
+    losing_trades: null,
+    win_rate: null,
+    roi: null,
+    maximum_drawdown: null,
+    first_connected_at: null,
+    last_successful_sync_at: null,
+    last_sync_error: null,
+    exchange_name: accountToSave.type === "crypto" ? accountToSave.exchange : null,
+    account_label: accountToSave.type === "crypto" ? accountToSave.accountLabel : null,
+    show_balance: accountToSave.showBalance,
+    created_at: now
+  };
+  const account = {
+    ...commonAccountFields,
+    account_type: accountToSave.type
+  };
+
+  try {
+    await collections.trader_profiles.insertOne(profile);
+    await collections.trading_accounts.insertOne(account);
+  } catch (error) {
+    try {
+      await collections.trader_profiles.deleteOne({ user_id: userId });
+    } catch (cleanupError) {
+      console.error("Could not remove a partial trader registration.", { traderId: userId });
+      throw new Error("Trader registration failed and profile cleanup was unsuccessful.", { cause: cleanupError });
+    }
+    if (isDuplicateEmailError(error)) throw new DuplicateEmailError();
+    if (accountToSave.type === "forex" && isDuplicateKeyError(error)) {
+      throw new DuplicateTradingAccountError();
+    }
+    throw error;
+  }
+
+  let connectionStatus: string | null = null;
+  if (accountToSave.type === "forex") {
+    if (investorPassword && isMetaApiConfigured()) {
+      connectionStatus = "connecting";
+      startTradingAccountConnection(userId, accountId, investorPassword);
+    } else if (investorPassword) {
+      connectionStatus = "integration_not_configured";
+      await collections.trading_accounts.updateOne(
+        { id: accountId, trader_id: userId },
+        { $set: { connection_status: connectionStatus } }
+      );
+    } else {
+      connectionStatus = isMetaApiConfigured() ? "not_connected" : "integration_not_configured";
+    }
+  }
+
+  const { token } = createSessionToken(userId, "trader");
+  return {
+    id: userId,
+    status: "pending_verification" as const,
+    emailConfirmationRequired: false,
+    accessToken: token,
+    tradingAccountId: accountId,
+    connectionStatus
+  };
 }

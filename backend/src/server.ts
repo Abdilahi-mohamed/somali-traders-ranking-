@@ -2,12 +2,13 @@ import rateLimit from "express-rate-limit";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
-import { getAdminFromAccessToken, InvalidAdminCredentialsError, loginAdmin, adminLoginSchema } from "./adminAuth.js";
+import { getAdminFromAccessToken, InvalidAdminCredentialsError, loginAdmin, adminLoginSchema, provisionInitialAdmin } from "./adminAuth.js";
 import { getAdminOverview } from "./adminOverview.js";
+import { AuthConfigurationError, validateAuthConfiguration } from "./authTokens.js";
 import { config, isMetaApiConfigured } from "./config.js";
 import { listLeaderboard } from "./leaderboard.js";
 import { DuplicateEmailError, DuplicateTradingAccountError, registerTrader, registrationSchema } from "./registration.js";
-import { SupabaseConfigurationError } from "./supabase.js";
+import { closeMongo, getMongoCollections, MongoConfigurationError } from "./mongo.js";
 import { getTraderFromAccessToken, InvalidTraderCredentialsError, loginTrader, traderLoginSchema } from "./traderAuth.js";
 import { connectOwnedTradingAccount, disconnectOwnedTradingAccount, listOwnedTradingAccounts, listOwnedTradingOpenPositions, metaApiIntegrationStatus, parseConnectionInput, refreshOwnedTradingAccount, synchronizeConnectedAccounts } from "./tradingAccounts.js";
 
@@ -133,7 +134,7 @@ app.post("/api/register", registrationLimiter, (request, response, next) => {
       response.status(409).json({ error: error.message });
       return;
     }
-    if (error instanceof SupabaseConfigurationError) {
+    if (error instanceof MongoConfigurationError || error instanceof AuthConfigurationError) {
       response.status(503).json({ error: error.message });
       return;
     }
@@ -160,7 +161,7 @@ app.post("/api/admin/login", adminLoginLimiter, (request, response, next) => {
       response.status(401).json({ error: error.message });
       return;
     }
-    if (error instanceof SupabaseConfigurationError) {
+    if (error instanceof MongoConfigurationError || error instanceof AuthConfigurationError) {
       response.status(503).json({ error: error.message });
       return;
     }
@@ -194,7 +195,7 @@ app.post("/api/trader/login", traderLoginLimiter, (request, response, next) => {
       response.status(401).json({ error: error.message });
       return;
     }
-    if (error instanceof SupabaseConfigurationError) {
+    if (error instanceof MongoConfigurationError || error instanceof AuthConfigurationError) {
       response.status(503).json({ error: error.message });
       return;
     }
@@ -277,15 +278,32 @@ app.get("/api/trader/overview", requireTrader, (request, response, next) => {
 
 app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
   console.error("API request failed.", { errorType: error instanceof Error ? error.name : "UnknownError" });
-  if (error instanceof SupabaseConfigurationError) {
+  if (error instanceof MongoConfigurationError || error instanceof AuthConfigurationError) {
     response.status(503).json({ error: error.message });
     return;
   }
   response.status(500).json({ error: "An unexpected server error occurred." });
 });
 
-app.listen(config.port, () => {
-  console.log(`Somali Traders API listening on http://localhost:${config.port}`);
+async function startServer() {
+  validateAuthConfiguration();
+  await getMongoCollections();
+  await provisionInitialAdmin();
+  app.listen(config.port, () => {
+    console.log(`Somali Traders API listening on http://localhost:${config.port}`);
+  });
+}
+
+void startServer().catch(async (error: unknown) => {
+  console.error("Could not start the API server.", { errorType: error instanceof Error ? error.name : "UnknownError" });
+  try {
+    await closeMongo();
+  } catch (closeError) {
+    console.error("Could not close MongoDB after server startup failed.", {
+      errorType: closeError instanceof Error ? closeError.name : "UnknownError"
+    });
+  }
+  process.exitCode = 1;
 });
 
 const synchronizationTimer = setInterval(() => {
